@@ -1,0 +1,65 @@
+# 디폴트 무시된 파일
+/shelf/
+/workspace.xml
+# 쿼리 파일을 포함한 무시된 디폴트 폴더
+/queries/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+# 에디터 기반 HTTP 클라이언트 요청
+/httpRequests/
+
+
+# =================================================================
+# [IDE & System Files]
+# =================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# =================================================================
+# [Python Backend]
+# =================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# =================================================================
+# [SAP HANA & Database]
+# =================================================================
+# HANA 접속 정보 및 인증서 파일
+*.hdbuserstore
+connection.properties
+*.key
+*.pem
+# 로컬 테스트용 DB 덤프 혹은 로그
+*.sql
+*.log
+db/src/data/*.bin
+
+# =================================================================
+# [Frontend - React/Vue]
+# =================================================================
+frontend/dashboard/node_modules/
+frontend/dashboard/build/
+frontend/dashboard/.env.local
+frontend/dashboard/.env.development.local
+frontend/dashboard/.env.test.local
+frontend/dashboard/.env.production.local
+frontend/dashboard/npm-debug.log*
+frontend/dashboard/yarn-debug.log*
+frontend/dashboard/yarn-error.log*
+
+# =================================================================
+# [Others]
+# =================================================================
