@@ -6,78 +6,115 @@
 
 ---
 
-## Project Overview
+## Project Background
 
 차량 OTA(Over-The-Air) 업데이트에서 가장 치명적인 문제는  
 **제어기(ECU) 간 버전 의존성 미검증으로 인한 업데이트 실패(Brick)** 입니다.
 
-본 프로젝트는 현대자동차 SDV / OTA 환경을 가정하여,
+본 프로젝트는 현대자동차 SDV / OTA 환경을 가정하여, **SAP HANA DB 레벨에서 배포 전 사전 검증**을 수행하는 시스템을 구현합니다.
 
-- 특정 ECU를 업데이트하기 전에
-- **다른 ECU들이 요구되는 최소 버전을 충족하는지**
-- **SAP HANA DB 레벨에서 사전 검증**
-
-하는 시스템을 구현하는 것을 목표로 합니다.
+### Key Objectives
+- ECU 간 **SW 버전 의존성 모델링**
+- OTA 패키지 배포 가능 여부를 **DB에서 사전 판단**
+- Brick 방지를 위한 **Pre-condition Check** 구조 설계
+- SAP HANA의 **In-Memory 고속 조인** 활용
 
 > OTA 배포 이전에 “이 차량은 업데이트 가능한 상태인가?”를  
 > **Yes / No로 명확히 판단**하는 것이 핵심입니다.
 
 ---
 
-## Key Goals
+## Why SAP NANA?
+### 현대자동차 기술 스택 경험
+본 프로젝트는 현대자동차그룹의 실제 엔터프라이즈 환경을 이해하기 위해 SAP HANA DB를 선택했습니다.
 
-- ECU 간 **SW 버전 의존성 모델링**
-- OTA 패키지 배포 가능 여부를 **DB에서 판단**
-- Brick 방지를 위한 **사전 검증(Pre-condition Check)** 구조 설계
-- SAP HANA 인메모리 DB의 **고속 조인 및 정합성 검증 활용**
+### HANA의 기술적 장점 (OTA 시스템 관점)
+| 특징 | OTA 시스템 적용 |
+|-----|---------------|
+| **In-Memory Processing** | 수천 대 차량의 실시간 배포 가능 여부 판단 |
+| **CDS View** | 복잡한 의존성 검증 로직을 View로 추상화 |
+| **Column Store** | 버전 정보 비교 연산 최적화 |
+| **High Availability** | 엔터프라이즈급 24/7 운영 안정성 |
+
+### Database Portability
+핵심 비즈니스 로직은 DB에 독립적으로 설계되었으며, 프로덕션 환경에서는:
+- **SQLAlchemy ORM**을 통한 DB 추상화 계층 구현
+- PostgreSQL, MySQL, Aurora 등 클라우드 DB로 전환 가능
+- Connection String 변경만으로 DB 교체 지원
+
+```python
+# DB 전환 예시
+# engine = create_engine('hana://user:pass@host:port')
+engine = create_engine('postgresql://user:pass@host:port/dbname')
+```
 
 ---
 
-## File Structure
-```txt
-ota-deployment-manager/
-├─ .gitignore                 # 루트 위치 (Python, IDE, HANA 설정 제외)
-├─ README.md                  # 프로젝트 개요 및 실행 방법
-├─ requirements.txt           # hdbcli, Flask/FastAPI, pydantic 등
-│
+## Core Problem & Solution
+```
+시나리오: BMS ECU v3.0 업데이트 시도
+├─ 요구사항: BCM ECU ≥ v2.0
+├─ 현재 상태: BCM ECU = v1.8
+└─ 결과: ❌ Brick 발생 (차량 기능 장애)
+```
+
+### Our Solution
+```
+사전 검증 시스템
+├─ 1단계: DependencyRule 조회
+├─ 2단계: 현재 ECU 버전 확인
+├─ 3단계: 버전 비교 (현재 < 최소?)
+└─ 결과: ✅ READY / ❌ INCOMPATIBLE
+```
+
+> **핵심**: OTA 서버가 배포하기 전에 DB가 먼저 차단
+
+---
+
+## System Architecture
+### High-Level Architecture
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   Vehicle   │──────│  OTA Server │──────│  Dashboard  │
+│  (Telematics)│      │   (API)     │      │    (Web)    │
+└─────────────┘      └──────┬──────┘      └─────────────┘
+                            │
+                    ┌───────▼────────┐
+                    │  SAP HANA DB   │
+                    │                │
+                    │ • Vehicles     │
+                    │ • ECUs         │
+                    │ • Rules        │
+                    │ • Validation   │
+                    └────────────────┘
+```
+
+### File Structure
+```
+ota-deployment-validator/
 ├─ db/                        # [HANA DB 영역]
 │  ├─ src/
 │  │  ├─ tables/
-│  │  │  └─ ota_tables.hdbcds # 테이블 정의 (Vehicles, ECUs, Rules 등)
+│  │  │  └─ ota_tables.hdbcds # 테이블 정의 (CDS)
 │  │  ├─ views/
-│  │  │  └─ v_eligibility.sql # 배포 가능 여부 사전 계산 View
+│  │  │  └─ v_eligibility.hdbview # 검증 View
 │  │  └─ data/
-│  │      └─ sample_data.csv  # 초기 적재용 데이터
-│  └─ schema.dbml             # dbdiagram.io 백업용 설계 파일
+│  │     └─ sample_data.csv   # 초기 데이터
+│  └─ schema.dbml             # ERD 설계
 │
-├─ backend/                   # [API 서버 영역]
-│  ├─ .env.example            # HANA 접속 정보 템플릿 (HOST, PORT, UID, PWD)
-│  ├─ app.py                  # 서버 진입점 (Flask 또는 FastAPI)
-│  ├─ database.py             # hdbcli 기반 HANA 연결 세션 관리
-│  ├─ dependency_check.py     # 핵심 로직 (DB View 호출 및 결과 가공)
-│  └─ models.py               # Response 데이터 구조 정의 (Pydantic)
+├─ backend/                   # [API 서버]
+│  ├─ .env.example            # HANA 접속 정보
+│  ├─ app.py                  # FastAPI 진입점
+│  ├─ database.py             # DB 연결 관리
+│  ├─ dependency_check.py     # 핵심 검증 로직
+│  └─ models.py               # Pydantic 모델
 │
-├─ frontend/                  # [대시보드 영역]
-│  └─ dashboard/              # React/Vue 기반 UI
-│     ├─ src/
-│     │  ├─ components/       # 차량 상태, 업데이트 리스트 컴포넌트
-│     │  └─ App.js            # API 연동 및 라우팅
-│     └─ package.json
+├─ frontend/                  # [대시보드]
+│  └─ dashboard/              # React 기반 UI
 │
-└─ scripts/                   # [유틸리티 스크립트]
-   └─ populate_db.py          # hdbcli를 이용한 CSV 데이터 벌크 업로드
+└─ scripts/                   # [유틸리티]
+   └─ populate_db.py          # 데이터 초기화
 ```
----
-
-## Core Concept
-
-### OTA 업데이트 실패 시나리오
-- BMS ECU를 v3.0으로 업데이트
-- 그러나 BCM ECU가 v2.0 이상이어야 정상 동작
-- BCM이 v1.8인 상태에서 업데이트 → **Brick 발생**
-
--> **이 문제를 OTA 서버가 아닌 DB가 먼저 차단**
-
 ---
 
 ## Domain Model
