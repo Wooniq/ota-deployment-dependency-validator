@@ -10,10 +10,20 @@
 
 ## Project Background
 
-차량 OTA(Over-The-Air) 업데이트에서 가장 치명적인 문제는  
-**제어기(ECU) 간 버전 의존성 미검증으로 인한 업데이트 실패(Brick)** 입니다.
+차량 OTA(Over-The-Air) 업데이트에서 가장 치명적인 문제는 **제어기(ECU) 간 버전 의존성 미검증으로 인한 업데이트 실패(Brick)**입니다.
 
-본 프로젝트는 현대자동차 SDV / OTA 환경을 가정하여, **SAP HANA DB 레벨에서 배포 전 사전 검증**을 수행하는 시스템을 구현합니다.
+본 프로젝트는 현대자동차 SDV 환경을 가정하여, **리눅스 에이전트 기반의 실시간 데이터 수집**부터 **SAP HANA DB 레벨의 사전 검증**, 그리고 **운영 관제 대시보드**까지의 End-to-End 흐름을 구현합니다.
+
+> OTA 배포 이전에 "이 차량은 업데이트 가능한 상태인가?"를 **DB 레벨에서 명확히 판단**하는 것이 핵심입니다.
+
+## System Architecture
+
+![Architecture](https://via.placeholder.com/800x400?text=OTA+System+Architecture+Diagram) **
+
+1. **Vehicle Edge (Linux)**: `ECU Agent`가 `/etc/ecu_info`를 파싱하여 현재 버전을 API로 전송
+2. **OTA Server (FastAPI)**: 차량 데이터를 수집하고 SAP HANA DB에 상태 업데이트
+3. **Database (SAP HANA)**: `Dependency Rules`를 기반으로 CDS View를 통한 실시간 의존성 검증
+4. **Monitoring (Dashboard)**: 전체 Fleet의 업데이트 가용성 및 Brick 위험도 시각화
 
 ### Key Objectives
 - ✅ ECU 간 **SW 버전 의존성 모델링**
@@ -26,7 +36,7 @@
 
 ---
 
-## 🔍 Why SAP HANA?
+## Why SAP HANA?
 
 ### 현대자동차 기술 스택 경험
 본 프로젝트는 현대자동차그룹의 실제 엔터프라이즈 환경을 이해하기 위해 SAP HANA DB를 선택했습니다.
@@ -98,28 +108,19 @@ engine = create_engine('postgresql://user:pass@host:port/dbname')
 ### File Structure
 ```
 ota-deployment-validator/
+├─ scripts/
+│  ├─ agent/                  # 리눅스 데이터 수집 에이전트
+│  │  └─ ecu_collector.py     # /etc/ecu_info 파싱 및 데이터 전송
+│  └─ populate_db.py          # 테스트 데이터 제너레이터
 ├─ db/                        # [HANA DB 영역]
 │  ├─ src/
-│  │  ├─ tables/
-│  │  │  └─ ota_tables.hdbcds # 테이블 정의 (CDS)
-│  │  ├─ views/
-│  │  │  └─ v_eligibility.hdbview # 검증 View
-│  │  └─ data/
-│  │     └─ sample_data.csv   # 초기 데이터
-│  └─ schema.dbml             # ERD 설계
+│  │  ├─ tables/              # CDS 기반 테이블 설계
+│  │  └─ views/               # 검증 로직이 포함된 View
 │
 ├─ backend/                   # [API 서버]
-│  ├─ .env.example            # HANA 접속 정보
-│  ├─ app.py                  # FastAPI 진입점
-│  ├─ database.py             # DB 연결 관리
-│  ├─ dependency_check.py     # 핵심 검증 로직
-│  └─ models.py               # Pydantic 모델
-│
-├─ frontend/                  # [대시보드]
-│  └─ dashboard/              # React 기반 UI
-│
-└─ scripts/                   # [유틸리티]
-   └─ populate_db.py          # 데이터 초기화
+│  ├─ app.py                  # 데이터 수집 및 검증 요청 처리
+│  └─ dependency_check.py     # 로직 추상화 계층
+└─ README.md
 ```
 
 ---
