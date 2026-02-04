@@ -40,6 +40,7 @@
 
 ### 현대자동차 기술 스택 경험
 본 프로젝트는 현대자동차그룹의 실제 엔터프라이즈 환경을 이해하기 위해 SAP HANA DB를 선택했습니다.
+차량 인벤토리 데이터는 쓰기(Write)보다 조회(Read)와 복잡한 조인(Join) 연산이 많기 때문에, HANA의 Column Storage 방식이 OTA 적합성 검증에 최적이라고 판단했습니다.
 
 ### HANA의 기술적 장점 (OTA 시스템 관점)
 | 특징 | OTA 시스템 적용 |
@@ -126,14 +127,15 @@ ota-deployment-validator/
 ---
 
 ## Domain Model
+- 실무 OTA 환경에서는 동일 제어기라도 생산 시점에 따라 HW 버전이 다를 수 있다는 점에 착안하여, HW-SW 호환성 검증 레이어를 설계에 추가했습니다. 또한, 수백만 대의 차량을 효율적으로 관리하기 위해 '캠페인' 단위의 배치 배포 구조를 채택했습니다.
 
-본 프로젝트는 아래 4개의 핵심 도메인으로 구성됩니다.
-
-- **Vehicle**: 차량 단위 정보
-- **ECU**: 차량 내 제어기 및 현재 SW 버전
-- **UpdatePackage**: OTA 업데이트 대상 패키지
-- **DependencyRule**: ECU 간 버전 의존성 규칙
-
+#### 핵심 도메인 모델
+1. **Vehicles (차량)**: `VIN` 기반의 실차 마스터 정보 관리.
+2. **Vehicle_ECU_Inventory (인벤토리)**: 각 차량의 제어기별 `HW 버전` 및 현재 `SW 버전` 실시간 추적.
+3. **Update_Packages (패키지)**: 배포 파일의 보안(`Hash`) 및 목표 `HW 사양` 정의.
+4. **Deployment_Campaigns (캠페인)**: 특정 모델/지역별 배포 정책 관리 (Batch 단위 배포).
+5. **Dependency_Rules (의존성)**: 제어기 간 정합성 검증 규칙.
+6. **Update_History (이력)**: 업데이트 과정의 상세 `Status` 및 `Error Code` 기록.
 ---
 
 ## Database Design
@@ -142,7 +144,7 @@ ota-deployment-validator/
 
 > OTA 업데이트 가능 여부 판단의 핵심 구조
 
-<img width="872" height="654" alt="OTA Dependency Management Schema" src="https://github.com/user-attachments/assets/49d541ff-f8d4-43e1-8ea5-c6994b0002f3" />
+![OTA Dependency Management Schema.png](./db.png)
 
 ### 주요 관계
 - **하나의 Vehicle은 여러 ECU를 가짐 (1:N)**
@@ -158,123 +160,111 @@ ota-deployment-validator/
 
 ---
 
-### Core Tables
+### Core Domain
 
-#### Vehicles (차량 마스터)
+실무 OTA 환경을 반영하여 **VIN(차대번호)** 중심의 자산 관리와 **캠페인 기반 배포** 구조로 설계되었습니다.
+
+### 1. Vehicles (차량 마스터)
 | Column | Type | Description |
 |:--- |:--- |:--- |
-| **vehicle_id** (PK) | VARCHAR(50) | 차량 고유 식별자 (VIN) |
-| model | VARCHAR(50) | 차종 (IONIQ6, GV80, EV6 등) |
-| status | VARCHAR(20) | 차량 상태 (READY/UPDATING/ERROR/BLOCKED) |
-| created_at | TIMESTAMP | 최초 등록 시간 |
-| updated_at | TIMESTAMP | 상태 변경 시간 |
+| **vehicle_id** (PK) | BIGINT | 내부 식별용 고유 ID |
+| **vin** (Unique) | VARCHAR(17) | 전 세계 유일 차량 식별 번호 (차대번호) |
+| model_code | VARCHAR(10) | 차종 코드 (예: GN7, NQ5, EV6 등) |
+| region | VARCHAR(10) | 판매 지역 (국내, 북미, 유럽 등 법규 대응용) |
 
-**상태 값 (status)**:
-- `READY`: OTA 배포 가능 상태
-- `UPDATING`: 업데이트 진행 중 (이중 배포 차단)
-- `ERROR`: 업데이트 실패 (점검 필요)
-- `BLOCKED`: 의존성 미충족 (배포 불가)
-
----
-
-#### ECUs (제어기 현황)
+### 2. Vehicle_ECU_Inventory (제어기 인벤토리)
 | Column | Type | Description |
 |:--- |:--- |:--- |
-| id (PK) | INTEGER | 식별자 (Auto Increment) |
-| vehicle_id (FK) | VARCHAR(50) | 소속 차량 ID |
-| ecu_type | VARCHAR(20) | 제어기 타입 |
-| **major_v** | INTEGER | 현재 SW 주 버전 |
-| **minor_v** | INTEGER | 현재 SW 부 버전 |
-| **patch_v** | INTEGER | 현재 SW 패치 버전 |
+| vehicle_id (FK) | BIGINT | 해당 차량 연결 |
+| **ecu_type** (PK) | VARCHAR(20) | 제어기 타입 (BMS, VCU, BCM 등) |
+| **hw_version** | VARCHAR(20) | **물리적 HW 사양 (SW 호환성 판단의 기준)** |
+| sw_major/minor/patch | INTEGER | 현재 차량에 설치된 SW 버전 정보 |
+| last_reported_at | TIMESTAMP | 최종 상태 보고 시각 |
 
-**제어기 종류 (ecu_type)**:
-- `BMS` (Battery Management System): 배터리 관리
-- `BCM` (Body Control Module): 바디 제어
-- `VCU` (Vehicle Control Unit): 차량 통합 제어
-- `ADAS` (Advanced Driver Assistance): 자율주행 보조
-- `Gateway`: 차량 내 네트워크 게이트웨이
-
-**인덱스**:
-```sql
--- 차량당 ECU 타입 중복 방지 + 고속 조회
-UNIQUE INDEX (vehicle_id, ecu_type);
-```
-
----
-
-#### UpdatePackages (신규 배포 패키지)
+### 3. Update_Packages (OTA SW 패키지)
 | Column | Type | Description |
 |:--- |:--- |:--- |
-| **package_id** (PK) | VARCHAR(50) | OTA 패키지 ID (예: PKG_BMS_3.0.0) |
-| target_ecu_type | VARCHAR(20) | 업데이트 대상 제어기 타입 |
-| target_major_v | INTEGER | 목표 주 버전 |
-| target_minor_v | INTEGER | 목표 부 버전 |
-| target_patch_v | INTEGER | 목표 패치 버전 |
+| **package_id** (PK) | VARCHAR(50) | 패키지 고유 식별자 |
+| **target_hw_version**| VARCHAR(20) | **설치 가능한 최소 HW 사양 (Brick 방지)** |
+| **file_hash** | VARCHAR(64) | **무결성 검증용 SHA-256 해시값 (보안)** |
+| sw_major/minor/patch | INTEGER | 배포될 목표 SW 버전 |
 
----
-
-#### DependencyRules (의존성 검증 규칙)
+### 4. Deployment_Campaigns (배포 캠페인)
 | Column | Type | Description |
 |:--- |:--- |:--- |
-| rule_id (PK) | INTEGER | 규칙 고유 ID (Auto Increment) |
-| package_id (FK) | VARCHAR(50) | 연결된 OTA 패키지 ID |
-| required_ecu_type | VARCHAR(20) | 선행 조건을 확인할 제어기 타입 |
-| **min_major_v** | INTEGER | 요구되는 최소 주 버전 |
-| **min_minor_v** | INTEGER | 요구되는 최소 부 버전 |
-| **min_patch_v** | INTEGER | 요구되는 최소 패치 버전 |
+| **campaign_id** (PK) | BIGINT | 캠페인 관리 ID |
+| package_id (FK) | VARCHAR(50) | 배포할 SW 패키지 |
+| target_model_code | VARCHAR(10) | 대상 차종 (예: IONIQ6 전용 배포) |
+| status | VARCHAR(20) | ACTIVE, PAUSED, FINISHED |
 
-**의존성 예시**:
-| Package | Required ECU | Min Version | Reason |
-|:--- |:--- |:--- |:--- |
-| PKG_BMS_3.0.0 | BCM | 2.0.0 | CAN 통신 프로토콜 변경 |
-| PKG_VCU_2.5.0 | Gateway | 1.8.0 | 새로운 메시지 타입 사용 |
+### 5. Update_History (업데이트 이력)
+| Column | Type | Description |
+|:--- |:--- |:--- |
+| history_id (PK) | BIGINT | 이력 식별자 |
+| vin (FK) | VARCHAR(17) | 대상 차량 VIN |
+| current_status | VARCHAR(20) | DOWNLOADING, INSTALLED, COMPLETED, **FAILED** |
+| **error_code** | VARCHAR(10) | **실패 원인 (E104:저전압, E201:통신불량 등)** |
 
 ---
 
 ### HANA CDS View (Eligibility Check)
 
 ```sql
-VIEW v_eligibility_check AS
-SELECT 
-    v.vehicle_id,
-    p.package_id,
-    CASE 
-        -- Rule이 없으면 무조건 가능
-        WHEN NOT EXISTS (
-            SELECT 1 FROM dependency_rules dr
-            WHERE dr.package_id = p.package_id
-        ) THEN 'READY'
-        
-        -- 필요한 ECU가 없으면 차단
-        WHEN EXISTS (
-            SELECT 1 FROM dependency_rules dr
-            WHERE dr.package_id = p.package_id
-            AND NOT EXISTS (
-                SELECT 1 FROM ecus e
-                WHERE e.vehicle_id = v.vehicle_id
-                AND e.ecu_type = dr.required_ecu_type
-            )
-        ) THEN 'MISSING_ECU'
-        
-        -- 버전 미달이면 차단
-        WHEN EXISTS (
-            SELECT 1 
-            FROM dependency_rules dr
-            INNER JOIN ecus e 
-                ON e.vehicle_id = v.vehicle_id
-                AND e.ecu_type = dr.required_ecu_type
-            WHERE dr.package_id = p.package_id
-                AND (
-                    e.major_v < dr.min_major_v 
-                    OR (e.major_v = dr.min_major_v AND e.minor_v < dr.min_minor_v)
-                    OR (e.major_v = dr.min_major_v AND e.minor_v = dr.min_minor_v AND e.patch_v < dr.min_patch_v)
-                )
-        ) THEN 'INCOMPATIBLE'
-        
-        ELSE 'READY'
-    END AS eligibility_status
-FROM vehicles v
-CROSS JOIN update_packages p;
+VIEW "OTA_SYSTEM"."v_ota_eligibility_check" AS
+SELECT
+  v.vin,
+  v.model_code,
+  c.campaign_id,
+  p.package_id,
+  p.target_ecu_type,
+  CASE
+    -- 1단계: 하드웨어 호환성 검증 (SW가 지원하는 HW 버전인가?)
+    WHEN i.hw_version IS NULL THEN 'ECU_NOT_FOUND'
+    WHEN i.hw_version != p.target_hw_version THEN 'INCOMPATIBLE_HW'
+
+    -- 2단계: 의존성 제어기 존재 여부 검증 (Dependency ECU가 차량에 장착되어 있는가?)
+    WHEN EXISTS (
+      SELECT 1 FROM "Dependency_Rules" dr
+      WHERE dr.package_id = p.package_id
+        AND NOT EXISTS (
+        SELECT 1 FROM "Vehicle_ECU_Inventory" e
+        WHERE e.vehicle_id = v.vehicle_id
+          AND e.ecu_type = dr.required_ecu_type
+      )
+    ) THEN 'MISSING_DEPENDENCY_ECU'
+
+    -- 3단계: 소프트웨어 버전 의존성 검증 (선행 제어기 버전이 충분한가?)
+    WHEN EXISTS (
+      SELECT 1
+      FROM "Dependency_Rules" dr
+             INNER JOIN "Vehicle_ECU_Inventory" e
+                        ON e.vehicle_id = v.vehicle_id
+                          AND e.ecu_type = dr.required_ecu_type
+      WHERE dr.package_id = p.package_id
+        AND (
+        e.sw_major_v < dr.min_sw_major_v
+          OR (e.sw_major_v = dr.min_sw_major_v AND e.sw_minor_v < dr.min_sw_minor_v)
+          OR (e.sw_major_v = dr.min_sw_major_v AND e.sw_minor_v = dr.min_sw_minor_v AND e.sw_patch_v < dr.min_sw_patch_v)
+        )
+    ) THEN 'DEPENDENCY_VERSION_MISMATCH'
+
+    -- 4단계: 동일 버전 혹은 하위 버전 업데이트 방지 (선택 사항)
+    WHEN (i.sw_major_v > p.sw_major_v)
+      OR (i.sw_major_v = p.sw_major_v AND i.sw_minor_v > p.sw_minor_v)
+      OR (i.sw_major_v = p.sw_major_v AND i.sw_minor_v = p.sw_minor_v AND i.sw_patch_v >= p.sw_patch_v)
+      THEN 'ALREADY_UP_TO_DATE'
+
+    ELSE 'READY'
+    END AS eligibility_status,
+  i.last_reported_at AS inventory_timestamp
+FROM "Vehicles" v
+-- 캠페인을 통해 배포 대상 차종(model_code)을 먼저 필터링 (성능 최적화 포인트)
+       INNER JOIN "Deployment_Campaigns" c ON v.model_code = c.target_model_code
+       INNER JOIN "Update_Packages" p ON c.package_id = p.package_id
+-- 대상 제어기의 현재 상태 조인
+       LEFT JOIN "Vehicle_ECU_Inventory" i ON v.vehicle_id = i.vehicle_id AND i.ecu_type = p.target_ecu_type
+WHERE c.status = 'ACTIVE'                          -- 활성화된 캠페인만 조회
+  AND CURRENT_TIMESTAMP BETWEEN c.start_date AND c.end_date; -- 배포 기간 내 확인
 ```
 
 ---
@@ -344,6 +334,20 @@ READY ──[start_update]──> PENDING ──[apply_package]──> UPDATING 
 - 버전 규칙 추가만으로 새로운 ECU 대응 가능
 - 정책 변경 시 코드 수정 없이 DB 규칙 변경
 
+### 4. Implementation Highlights
+- 하드웨어 버전(HW Version) 무결성 보장
+"소프트웨어 버전만 체크하는 것은 위험합니다. 실제 차량은 연식에 따라 제어기 HW 사양이 다르기 때문에, target_hw_version 필드를 도입하여 하드웨어-소프트웨어 간 불일치로 인한 Brick 현상을 원천 차단했습니다."
+
+- 차분 업데이트(Delta Update) 확장성 고려
+"패키지 관리 설계 시, 전체 파일 전송뿐만 아니라 버전 간 차이점만 전송하는 Delta 배포 모델로 확장할 수 있도록 패키지 메타데이터 구조를 설계했습니다."
+
+- 상세 에러 코드를 통한 실패 분석
+"단순 성공/실패 기록이 아닌, Error_Code 체계를 도입하여 배터리 전압 부족, 통신 타임아웃 등 현장의 실패 원인을 데이터화하여 배포 성공률(Success Rate) 분석이 가능케 했습니다."
+
+### 5. Future Roadmap 
+- Phase 2: 차량의 배터리 전압(SoC) 상태를 체크하는 Pre-condition 로직 추가.
+
+- Phase 3: 대규모 차량(10만대 이상) 동시 접속 시 HANA의 Partitioning을 활용한 성능 최적화.
 ---
 
 ## Tech Stack
