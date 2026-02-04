@@ -10,7 +10,7 @@
 
 ## Project Background
 
-차량 OTA(Over-The-Air) 업데이트에서 가장 치명적인 문제는 **제어기(ECU) 간 버전 의존성 미검증으로 인한 업데이트 실패(Brick)**입니다.
+차량 OTA(Over-The-Air) 업데이트에서 가장 치명적인 문제는 **제어기(ECU) 간 버전 의존성 미검증으로 인한 업데이트 실패(Brick)** 입니다.
 
 본 프로젝트는 현대자동차 SDV 환경을 가정하여, **리눅스 에이전트 기반의 실시간 데이터 수집**부터 **SAP HANA DB 레벨의 사전 검증**, 그리고 **운영 관제 대시보드**까지의 End-to-End 흐름을 구현합니다.
 
@@ -18,7 +18,6 @@
 
 ## System Architecture
 
-![Architecture](https://via.placeholder.com/800x400?text=OTA+System+Architecture+Diagram) **
 
 1. **Vehicle Edge (Linux)**: `ECU Agent`가 `/etc/ecu_info`를 파싱하여 현재 버전을 API로 전송
 2. **OTA Server (FastAPI)**: 차량 데이터를 수집하고 SAP HANA DB에 상태 업데이트
