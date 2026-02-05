@@ -26,7 +26,7 @@ func main() {
 		ECUType:   "BMS",
 		HWVersion: "HW_1.0",
 		SWMajor:   2,
-		SWMinor:   1,
+		SWMinor:   0,
 		SWPatch:   0,
 	}
 
