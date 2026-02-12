@@ -34,7 +34,9 @@ jobs:
           go-version: '1.21'
 
       - name: Go Build Check (Agent)
-        run: go build -v -o /dev/null ./scripts/agent/ecu_collector.go
+        run: |
+          cd agent
+          go build -v -o /dev/null ./main.go
 
   # 2단계: 자동 머지 (검증 통과 시)
   automerge:
