@@ -1,0 +1,7 @@
+{
+  "vin": "HMG-SDV-2026-001",
+  "ecus": [
+    { "id": "BMS0", "hw_version": "HW-1.0", "sw_version": "SW-1.1.0" },
+    { "id": "BCM1", "hw_version": "HW-2.1", "sw_version": "SW-2.0.5" }
+  ]
+}
