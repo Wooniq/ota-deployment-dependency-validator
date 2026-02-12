@@ -4,6 +4,7 @@ package collector
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 )
 
@@ -18,8 +19,8 @@ type ECUInfo struct {
 // VehicleInventory: 차량 전체의 식별 정보와 장착된 제어기 목록을 정의합니다.
 // 1:N 관계(차량 1대 - 여러 제어기)를 표현하기 위한 최상위 구조체입니다.
 type VehicleInventory struct {
-	VIN  string `json:"vin"`  // 차대번호 (Vehicle Identification Number)
-	ECUs []ECU  `json:"ecus"` // 해당 차량에 탑재된 제어기 배열 (슬라이스)
+	VIN  string    `json:"vin"`  // 차대번호 (Vehicle Identification Number)
+	ECUs []ECUInfo `json:"ecus"` // 해당 차량에 탑재된 제어기 배열 (슬라이스)
 }
 
 // 데이터 무결성 검증 메서드
@@ -38,23 +39,23 @@ func (v *VehicleInventory) Validate() error {
 func LoadInventory(path string) (*VehicleInventory, error) {
 	// 1. 파일 읽기 (바이트 배열로)
 	// 1. 파일 읽기
-    data, err := os.ReadFile(path)
-    if err != nil {
-       return nil, err
-    }
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 
-    // 2. 구조체 변수 먼저 생성
-    var inv VehicleInventory
+	// 2. 구조체 변수 먼저 생성
+	var inv VehicleInventory
 
-    // 3. JSON 데이터를 구조체에 채우기
-    if err := json.Unmarshal(data, &inv); err != nil {
-       return nil, err
-    }
+	// 3. JSON 데이터를 구조체에 채우기
+	if err := json.Unmarshal(data, &inv); err != nil {
+		return nil, err
+	}
 
-    // 4. 다 채워진 데이터 검사하기
-    if err := inv.Validate(); err != nil {
-       return nil, err
-    }
+	// 4. 다 채워진 데이터 검사하기
+	if err := inv.Validate(); err != nil {
+		return nil, err
+	}
 
-    return &inv, nil
+	return &inv, nil
 }
