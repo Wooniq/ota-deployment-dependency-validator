@@ -26,7 +26,7 @@ func main() {
 
 	for i := 1; i <= totalVehicles; i++ {
 		wg.Add(1)
-		go func(vehicleId int) {
+		go func(vehicleID int) {
 			defer wg.Done()
 
 			configPath := fmt.Sprintf("agent/config/vehicle_%04d.json", vehicleID)
