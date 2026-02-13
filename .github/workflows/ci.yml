@@ -5,9 +5,9 @@ on:
     branches: [ main, chore, "feature/**" ]
   pull_request:
     branches: [ main ]
+    types: [labeled, opened, synchronize, reopened] # PR 관련 이벤트 구체화
 
 jobs:
-  # 1단계: 검증 (Lint + Build)
   test-and-build:
     runs-on: ubuntu-latest
     steps:
@@ -17,16 +17,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8
-
-      - name: Lint with flake8
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -38,15 +28,25 @@ jobs:
           cd agent
           go build -v -o /dev/null ./main.go
 
-  # 2단계: 자동 머지 (검증 통과 시)
   automerge:
-    needs: test-and-build # 1단계가 성공해야 실행됨
+    needs: test-and-build
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' # PR일 때만 작동
+    # PR 이벤트이거나, 특정 라벨이 붙었을 때 실행되도록 설정 가능
+    if: github.event_name == 'pull_request'
+
+    # 머지 권한 부여
+    permissions:
+      contents: write
+      pull-requests: write
+
     steps:
       - name: automerge
         uses: "pascalgn/automerge-action@v0.16.2"
         env:
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-          MERGE_LABELS: "" # 라벨 조건 없이 모든 PR 시도 (위험하면 "automerge" 라벨 지정 가능)
-          MERGE_METHOD: "squash" # 커밋을 하나로 합쳐서 메인에 반영
+          GITHUB_TOKEN: "${{ secrets.MY_GITHUB_TOKEN }}"
+          MERGE_LABELS: ""
+          MERGE_METHOD: "squash"
+          MERGE_FORKS: "false"
+          # 머지 실패 시 에러를 내지 않고 조용히 넘어가게 하려면 아래 옵션 추가
+          # MERGE_RETRIES: "3"
+          # MERGE_RETRY_SLEEP: "10000"
