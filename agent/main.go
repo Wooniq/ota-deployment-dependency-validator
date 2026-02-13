@@ -29,7 +29,7 @@ func main() {
 		go func(vehicleID int) {
 			defer wg.Done()
 
-			configPath := fmt.Sprintf("agent/config/vehicle_%04d.json", vehicleID)
+			configPath := fmt.Sprintf("data/inventory/vehicle_%04d.json", vehicleID)
 			baseDelay := 10 * time.Second
 			currentDelay := baseDelay
 			maxDelay := 1 * time.Minute // 최대 백오프 시간

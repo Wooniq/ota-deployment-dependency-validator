@@ -66,3 +66,7 @@ frontend/dashboard/yarn-error.log*
 
 .idea/
 *.iml
+
+# 가상 데이터
+data/inventory/
+data/inventory/*.json
