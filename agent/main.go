@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -48,12 +49,23 @@ func main() {
 					// 성공 시 대기 시간 초기화
 					currentDelay = baseDelay
 
-					payload := []byte(fmt.Sprintf("VIN:%s-TIME:%d", inv.VIN, time.Now().Unix()))
+					// 차량의 실제 데이터를 페이로드로 구성
+					var payloadBuf bytes.Buffer
+					// 1. VIN 추가
+					payloadBuf.WriteString(inv.VIN)
+
+					// 2. 모든 ECU 정보를 페이로드에 포함 (차량마다 길이가 달라지는 지점)
+					for _, ecu := range inv.ECUs {
+						payloadBuf.WriteString(ecu.ID)        // 4바이트 ID
+						payloadBuf.WriteString(ecu.SWVersion) // 가변 SW 버전 (v1.0.0 등)
+					}
+
+					// 조립된 전체 바이트를 페이로드로 전달
+					payload := payloadBuf.Bytes()
 					binaryData, err := protocol.CreateDltPacket("ICU ", "INV ", payload)
+					// [수정 끝]
 
 					if err == nil {
-						// 2. 메시지 전송 추상화 (Transport)
-						// TODO: http.Post 또는 Kafka Producer 연결
 						sendToBackend(vehicleID, binaryData)
 					}
 				}
