@@ -70,3 +70,14 @@ frontend/dashboard/yarn-error.log*
 # 가상 데이터
 data/inventory/
 data/inventory/*.json
+
+# Infrastructure Data & Logs
+infra/mosquitto/data/
+infra/mosquitto/log/*.log
+# 만약 나중에 Kafka 데이터를 추가한다면
+infra/kafka/data/
+infra/zookeeper/data/
+
+# Go binary & dependencies
+agent/agent.exe
+vendor/
