@@ -20,10 +20,10 @@ type DltStandardHeader struct {
 // DltExtendedHeader: 로그의 상세 메타데이터를 담는 12바이트 확장 헤더
 // 차량 내 어떤 제어기(ECU)에서 어떤 종류의 데이터가 왔는지 정의합니다.
 type DltExtendedHeader struct {
-	MsgInfo       uint8    // MSIN: 메시지 타입 (Log, Trace, Network 등) 및 레벨 정보
-	NumArgs       uint8    // NOAR: 메시지에 포함된 인자의 개수
-	ApplicationID [4]byte  // APID: 로그를 생성한 애플리케이션 식별자 (예: 'BMS ', 'ICU ')
-	ContextID     [4]byte  // CTID: 특정 기능 또는 모듈 식별자 (예: 'VOLT', 'TEMP')
+	MsgInfo       uint8   // MSIN: 메시지 타입 (Log, Trace, Network 등) 및 레벨 정보
+	NumArgs       uint8   // NOAR: 메시지에 포함된 인자의 개수
+	ApplicationID [4]byte // APID: 로그를 생성한 애플리케이션 식별자 (예: 'BMS ', 'ICU ')
+	ContextID     [4]byte // CTID: 특정 기능 또는 모듈 식별자 (예: 'VOLT', 'TEMP')
 }
 
 // CreateDltPacket: 전달받은 식별자와 데이터를 결합하여 최종 바이너리 패킷을 생성합니다.
