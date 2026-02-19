@@ -1,6 +1,7 @@
 go 1.25.6
+
 use (
-    ./cmd/agent
-    ./cmd/server
-    ./internal
+	./cmd/agent
+	./cmd/server
+	./internal
 )
