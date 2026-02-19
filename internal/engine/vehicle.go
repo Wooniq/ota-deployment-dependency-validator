@@ -11,13 +11,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/Wooniq/ota-agent/internal/transport"
 	"log"
 	"math/rand"
-	"ota-agent/internal/transport"
 	"time"
 
-	"ota-agent/internal/collector"
-	"ota-agent/internal/protocol"
+	"github.com/Wooniq/ota-agent/internal/collector"
+	"github.com/Wooniq/ota-agent/internal/protocol"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )

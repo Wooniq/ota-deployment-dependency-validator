@@ -6,9 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"ota-agent/internal/repository"
-	"ota-agent/internal/service"
-	"ota-agent/internal/transport"
+	"github.com/Wooniq/ota-agent/internal/repository"
+	"github.com/Wooniq/ota-agent/internal/service"
+	"github.com/Wooniq/ota-agent/internal/transport"
 
 	"github.com/joho/godotenv"
 )

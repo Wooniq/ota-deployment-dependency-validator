@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"ota-agent/internal/repository"
+	"github.com/Wooniq/ota-agent/internal/repository"
 )
 
 // OTAAnalyzer : 비즈니스 로직을 수행하는 서비스 객체

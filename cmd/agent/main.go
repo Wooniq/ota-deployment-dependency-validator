@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/signal"
 
-	"ota-agent/internal/engine"
-	"ota-agent/internal/transport"
+	"github.com/Wooniq/ota-agent/internal/engine"
+	"github.com/Wooniq/ota-agent/internal/transport"
 
 	"sync"
 	"syscall"

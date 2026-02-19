@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	"ota-agent/internal/protocol"
-	"ota-agent/internal/service"
+	"github.com/Wooniq/ota-agent/internal/protocol"
+	"github.com/Wooniq/ota-agent/internal/service"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )

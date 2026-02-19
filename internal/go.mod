@@ -1,11 +1,10 @@
-module ota-agent
+module github.com/Wooniq/ota-agent/internal
 
 go 1.25.6
 
 require (
 	github.com/SAP/go-hdb v1.15.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
-	github.com/joho/godotenv v1.5.1
 )
 
 require (
