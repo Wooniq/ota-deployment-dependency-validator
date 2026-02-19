@@ -128,6 +128,7 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 	}
 
 	log.Printf("[Success] VIN:%s 분석 및 HANA DB 저장 완료 (Status:%s)", vin, status)
+
 	return nil
 }
 
