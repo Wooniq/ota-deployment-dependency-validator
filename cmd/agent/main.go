@@ -6,12 +6,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
+
+	"ota-agent/internal/engine"
+	"ota-agent/internal/transport"
+
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/Wooniq/ota-agent/internal/engine"
-	"github.com/Wooniq/ota-agent/internal/transport"
 
 	// 2. MQTT 타입을 사용하기 위한 외부 패키지 임포트
 	mqtt "github.com/eclipse/paho.mqtt.golang"

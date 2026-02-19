@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sync/atomic" // 스레드 안전한 카운팅을 위해 추가
 )
 
@@ -60,4 +61,29 @@ func CreateDltPacket(apid, ctid string, payload []byte) ([]byte, error) {
 	buf.Write(payload)
 
 	return buf.Bytes(), nil
+}
+
+// ParseDltPacket: [서버용] 표준 규격에 맞게 패킷 해석
+func ParseDltPacket(data []byte) ([]byte, error) {
+	// 1. 최소 헤더 길이 확인
+	if len(data) < 16 {
+		return nil, fmt.Errorf("패킷이 너무 짧음 (최소 16바이트 필요)")
+	}
+
+	// 2. 헤더 읽기
+	var stdHeader DltStandardHeader
+	reader := bytes.NewReader(data)
+	if err := binary.Read(reader, binary.BigEndian, &stdHeader); err != nil {
+		return nil, fmt.Errorf("헤더 읽기 실패: %v", err)
+	}
+
+	// 3. [에러 방지] 길이 정합성 체크
+	// 네트워크 전송 중 미세한 Truncation이 발생할 수 있으므로
+	// 헤더 크기(16)보다만 크다면 수신된 만큼을 페이로드로 인정합니다.
+	if len(data) < 16 {
+		return nil, fmt.Errorf("유효하지 않은 DLT 데이터")
+	}
+
+	// 4. 순수 페이로드 반환 (헤더 16바이트 이후 전부)
+	return data[16:], nil
 }

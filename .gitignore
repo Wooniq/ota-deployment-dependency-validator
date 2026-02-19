@@ -79,5 +79,5 @@ infra/kafka/data/
 infra/zookeeper/data/
 
 # Go binary & dependencies
-agent/agent.exe
+cmd/agent/agent.exe
 vendor/

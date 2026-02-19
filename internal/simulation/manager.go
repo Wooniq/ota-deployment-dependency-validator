@@ -13,7 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wooniq/ota-agent/internal/engine"
+	"ota-agent/internal/engine"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 

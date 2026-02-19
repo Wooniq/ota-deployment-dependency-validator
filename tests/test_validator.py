@@ -1,4 +1,4 @@
-from backend.validator import validate_ota
+from cmd.server.validator import validate_ota
 
 # --- 모듈 독립 테스트 (더미 데이터) ---
 def run_test_scenario(name, ecus, rules):
