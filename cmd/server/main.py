@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
-from backend.validator import validate_ota
+from cmd.server.validator import validate_ota
 
 app = FastAPI(title="OTA 의존성 검증 시스템")
 

@@ -25,7 +25,12 @@ jobs:
 
       - name: Go Build Check (Agent)
         run: |
-          cd agent
+          cd cmd/agent
+          go build -v -o /dev/null ./main.go
+
+      - name: Go Build Check (Server)
+        run: |
+          cd cmd/server
           go build -v -o /dev/null ./main.go
 
   automerge:
