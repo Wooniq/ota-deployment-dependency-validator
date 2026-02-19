@@ -127,7 +127,8 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 		return fmt.Errorf("HANA DB 저장 실패: %w", err)
 	}
 
-	log.Printf("[Success] VIN:%s 분석 완료 (Status:%s, SOH:%.2f)", vin, status, batterySOH)
+	log.Printf("[Success] VIN:%s 분석 및 HANA DB 저장 완료 (Status:%s)", vin, status)
+
 	return nil
 }
 
