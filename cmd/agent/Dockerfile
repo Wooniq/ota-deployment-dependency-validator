@@ -1,4 +1,5 @@
 # 1단계: 빌드 스테이지 (Go 1.25 환경)
+
 FROM golang:1.25-alpine AS builder
 
 # 작업 디렉토리 설정
