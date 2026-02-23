@@ -2,71 +2,54 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
 
-	"sync"
 	"syscall"
-	"time"
 
 	"github.com/Wooniq/ota-agent/pkg/engine"
 	"github.com/Wooniq/ota-agent/pkg/transport"
-	// 2. MQTT 타입을 사용하기 위한 외부 패키지 임포트
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 func main() {
-	const totalVehicles = 1000
+	// 1. 환경 변수로부터 차량 식별 정보(VIN) 로드
+	// K8s Deployment의 env 설정에서 주입될 값
+	vin := os.Getenv("VEHICLE_VIN")
+	if vin == "" {
+		// 로컬 테스트용 기본값 (K8s 없이 단독 실행 시 사용)
+		vin = "VIN-DEBUG-0001"
+	}
+
+	// 2. 브로커 주소 환경 변수화
+	// 로컬에서는 localhost지만, K8s 내부에서는 서비스 이름(예: mqtt-svc)으로 접근합니다.
+	broker := os.Getenv("MQTT_BROKER_URL")
+	if broker == "" {
+		broker = "tcp://localhost:1885"
+	}
+
+	// 3. Graceful Shutdown을 위한 컨텍스트 설정
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 1. MQTT 옵션 설정
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker("tcp://localhost:1885")
-	opts.SetClientID("ota-main-collector") // 메인 클라이언트 ID
-	opts.SetAutoReconnect(true)
-
-	// 2. 클라이언트 생성 및 실제 연결
-	client := mqtt.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		log.Fatalf("MQTT 브로커 연결 실패: %v", token.Error())
+	// 4. 이 차량 전용 MQTT 클라이언트 생성 및 연결
+	// transport.NewMQTTClient 내부에서 ClientID를 VIN으로 설정하도록 되어있어야 합니다.
+	client, err := transport.NewMQTTClient(broker, vin)
+	if err != nil {
+		log.Fatalf("[%s] MQTT 브로커 연결 실패: %v", vin, err)
 	}
-	log.Println("MQTT 브로커 연결 성공 (port: 1885)")
+	log.Printf("[%s] MQTT 연결 성공: %s", vin, broker)
 
-	var wg sync.WaitGroup
-	log.Printf("%d 대의 가상 차량 시뮬레이션 시작 (exit : Ctrl + C)", totalVehicles)
-
-	for i := 1; i <= totalVehicles; i++ {
-		wg.Add(1)
-		vin := fmt.Sprintf("VIN-%06d", i)
-
-		go func(id int, v_vin string) {
-			defer wg.Done()
-
-			// transport 패키지의 함수를 사용하여 각자 연결
-			client, err := transport.NewMQTTClient("tcp://localhost:1885", v_vin)
-			if err != nil {
-				log.Printf("VIN:%s 연결 실패: %v", v_vin, err)
-				return
-			}
-
-			v := engine.Vehicle{
-				ID:     id,
-				Client: client,
-			}
-			v.Start(ctx)
-		}(i, vin)
-
-		time.Sleep(20 * time.Millisecond)
+	// 5. engine.Vehicle 구조체 초기화
+	v := engine.Vehicle{
+		VIN:    vin,
+		Client: client,
 	}
 
-	// 프로그램이 바로 종료되지 않도록 대기
-	<-ctx.Done()
-	log.Println("종료 신호 감지, 시뮬레이션을 중단합니다...")
+	log.Printf("=== OTA Agent 시작 [VIN: %s] ===", v.VIN)
 
-	// 모든 고루틴이 정리될 때까지 잠시 대기
-	client.Disconnect(250)
-	log.Println("모든 에이전트 종료")
+	// 6. 에이전트 실행 (Start 내부에서 OnUpdateReceived와 루프가 동작함)
+	v.Start(ctx)
+
+	log.Printf("[%s] 에이전트 종료 프로세스 완료", vin)
 }
