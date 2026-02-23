@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wooniq/ota-agent/internal/protocol"
+	"github.com/Wooniq/ota-agent/pkg/protocol"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 

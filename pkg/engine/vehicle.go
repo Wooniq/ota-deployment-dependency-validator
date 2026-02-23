@@ -11,14 +11,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/Wooniq/ota-agent/internal/transport"
 	"log"
 	"math/rand"
 	"time"
 
-	"github.com/Wooniq/ota-agent/internal/collector"
-	"github.com/Wooniq/ota-agent/internal/protocol"
-
+	"github.com/Wooniq/ota-agent/pkg/collector"
+	"github.com/Wooniq/ota-agent/pkg/protocol"
+	"github.com/Wooniq/ota-agent/pkg/transport"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -98,7 +97,7 @@ func (v *Vehicle) Start(ctx context.Context) {
 		// 4. 인터럽트 가능한 대기 (Graceful Shutdown 지원)
 		select {
 		case <-ctx.Done():
-			log.Printf("[Vehicle-%04d] 안전하게 종료되었습니다.", v.ID)
+			//log.Printf("[Vehicle-%04d] 안전하게 종료되었습니다.", v.ID)
 			return
 		case <-time.After(currentDelay):
 		}

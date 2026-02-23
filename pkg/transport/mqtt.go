@@ -18,7 +18,7 @@ import (
 
 // NewMQTTClient : 차량별 고유 세션을 가진 MQTT 클라이언트 생성
 func NewMQTTClient(brokerAddr string, clientID string) (mqtt.Client, error) {
-	fmt.Printf("[Debug] VIN:%s 접속 시도 중 (Addr: %s)...\n", clientID, brokerAddr)
+	//fmt.Printf("[Debug] VIN:%s 접속 시도 중 (Addr: %s)...\n", clientID, brokerAddr)
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(brokerAddr)
@@ -32,7 +32,7 @@ func NewMQTTClient(brokerAddr string, clientID string) (mqtt.Client, error) {
 		return nil, token.Error()
 	}
 
-	fmt.Printf("[Debug] VIN:%s 접속 성공!\n", clientID)
+	//fmt.Printf("[Debug] VIN:%s 접속 성공!\n", clientID)
 	return client, nil
 }
 

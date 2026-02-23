@@ -1,4 +1,4 @@
-module github.com/Wooniq/ota-agent/internal
+module github.com/Wooniq/ota-agent/pkg
 
 go 1.25.6
 
