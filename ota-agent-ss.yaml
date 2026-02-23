@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: ota-agent
-          image: ota-agent:v1
+          image: docker.io/library/ota-agent:v1
           imagePullPolicy: Never  # 로컬 빌드 이미지만 사용
           resources:
             requests:
