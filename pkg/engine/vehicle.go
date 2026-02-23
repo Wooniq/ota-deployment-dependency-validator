@@ -48,14 +48,15 @@ func (v *Vehicle) OnUpdateReceived(filePath string, expectedHash string) {
 
 	// 무결성 검증 수행
 	success, err := v.VerifyFirmware(filePath, expectedHash)
+
 	if err != nil || !success {
-		log.Printf("[%s] 검증 실패: %v", v.VIN, err)
-		v.reportStatus("ERR_HASH_MISMATCH") // 에러 코드 체계화
+		// transport 패키지의 도구를 호출하여 에러 보고
+		transport.SendStatus(v.Client, v.VIN, "ERR_HASH_MISMATCH")
 		return
 	}
 
-	log.Printf("[%s] 무결성 검증 통과 (SHA-256 일치)", v.VIN)
-	v.reportStatus("SUCCESS_VERIFIED")
+	// 성공 시 보고
+	transport.SendStatus(v.Client, v.VIN, "SUCCESS_VERIFIED")
 }
 
 // 3. 업데이트 명령 구독 설정

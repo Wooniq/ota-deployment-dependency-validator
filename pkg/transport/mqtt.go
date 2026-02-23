@@ -60,3 +60,22 @@ func SendToBroker(client mqtt.Client, vin string, data []byte) {
 		}
 	}()
 }
+
+// SendStatus: 차량의 현재 상태(예: 검증 성공, 해시 불일치 등)를 서버로 전송
+func SendStatus(client mqtt.Client, vin string, status string) {
+	if client == nil || !client.IsConnected() {
+		return
+	}
+
+	// 상태 보고 전용 토픽 구조
+	topic := fmt.Sprintf("ota/vehicles/%s/status", vin)
+
+	// 이력 관리는 중요하므로 QoS 1을 사용하여 전달 보장
+	token := client.Publish(topic, 1, false, status)
+
+	go func() {
+		if token.WaitTimeout(3*time.Second) && token.Error() != nil {
+			// 실패 시 로깅 로직
+		}
+	}()
+}
