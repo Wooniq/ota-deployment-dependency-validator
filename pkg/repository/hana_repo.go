@@ -34,6 +34,49 @@ func NewHANARepository(host, port, user, password string) (*HANARepository, erro
 	return &HANARepository{db: db}, nil
 }
 
+// GetAllVehicles : DB에 저장된 모든 차량의 인벤토리 정보를 조회
+func (r *HANARepository) GetAllVehicles() ([]VehicleInfo, error) {
+	query := `SELECT VIN, HW_VERSION, ADAS_VERSION, BMS_VERSION, UPDATE_STATUS, REGION_CODE, BATTERY_SOH, NEEDS_UPDATE FROM VEHICLE_ECU_INVENTORY`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("차량 목록 조회 실패: %w", err)
+	}
+	defer rows.Close()
+
+	var list []VehicleInfo
+	for rows.Next() {
+		var v VehicleInfo
+		if err := rows.Scan(&v.VIN, &v.HWVersion, &v.ADASVersion, &v.BMSVersion, &v.UpdateStatus, &v.RegionCode, &v.BatterySOH, &v.NeedsUpdate); err != nil {
+			return nil, err
+		}
+		list = append(list, v)
+	}
+	return list, nil
+}
+
+// GetVehiclesByUpdateStatus : 업데이트 필요 여부(NeedsUpdate)에 따라 차량 필터링 조회
+func (r *HANARepository) GetVehiclesByUpdateStatus(needsUpdate bool) ([]VehicleInfo, error) {
+	query := `SELECT VIN, HW_VERSION, ADAS_VERSION, BMS_VERSION, UPDATE_STATUS, REGION_CODE, BATTERY_SOH, NEEDS_UPDATE 
+              FROM VEHICLE_ECU_INVENTORY WHERE NEEDS_UPDATE = ?`
+
+	rows, err := r.db.Query(query, needsUpdate)
+	if err != nil {
+		return nil, fmt.Errorf("필터링 조회 실패: %w", err)
+	}
+	defer rows.Close()
+
+	var list []VehicleInfo
+	for rows.Next() {
+		var v VehicleInfo
+		if err := rows.Scan(&v.VIN, &v.HWVersion, &v.ADASVersion, &v.BMSVersion, &v.UpdateStatus, &v.RegionCode, &v.BatterySOH, &v.NeedsUpdate); err != nil {
+			return nil, err
+		}
+		list = append(list, v)
+	}
+	return list, nil
+}
+
 // UpsertVehicle : 차량 인벤토리 정보를 저장하거나 기존 정보 업데이트(Merge)
 func (r *HANARepository) UpsertVehicle(info VehicleInfo) error {
 	query := `

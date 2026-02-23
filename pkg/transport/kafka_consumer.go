@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/Wooniq/ota-agent/internal/service"
+	"github.com/Wooniq/ota-agent/pkg/service"
 	"github.com/segmentio/kafka-go"
 )
 
