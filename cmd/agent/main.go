@@ -14,18 +14,16 @@ import (
 
 func main() {
 	// 1. 환경 변수로부터 차량 식별 정보(VIN) 로드
-	// K8s Deployment의 env 설정에서 주입될 값
-	vin := os.Getenv("VEHICLE_VIN")
+	// YAML의 MY_POD_NAME(ota-agent-0, 1...)을 VIN으로 사용합니다.
+	vin := os.Getenv("MY_POD_NAME")
 	if vin == "" {
-		// 로컬 테스트용 기본값 (K8s 없이 단독 실행 시 사용)
 		vin = "VIN-DEBUG-0001"
 	}
 
 	// 2. 브로커 주소 환경 변수화
-	// 로컬에서는 localhost지만, K8s 내부에서는 서비스 이름(예: mqtt-svc)으로 접근합니다.
-	broker := os.Getenv("MQTT_BROKER_URL")
+	broker := os.Getenv("BROKER_URL")
 	if broker == "" {
-		broker = "tcp://localhost:1885"
+		broker = "tcp://localhost:1883"
 	}
 
 	// 3. Graceful Shutdown을 위한 컨텍스트 설정
