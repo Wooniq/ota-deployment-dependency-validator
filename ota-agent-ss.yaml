@@ -5,6 +5,7 @@ metadata:
 spec:
   serviceName: "ota-agent"
   replicas: 1000  # 1,000대 가상 차량 생성
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: ota-agent
@@ -15,7 +16,10 @@ spec:
     spec:
       containers:
         - name: ota-agent
-          image: docker.io/library/ota-agent:v1
+          image: docker.io/library/ota-agent:v4
+          volumeMounts:
+          - name: inventory-volume
+            mountPath: /etc/ota
           imagePullPolicy: Never  # 로컬 빌드 이미지만 사용
           resources:
             requests:
@@ -31,3 +35,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name  # 각 Pod의 고유 이름을 앱에서 VIN으로 사용 가능
+      volumes:
+      - name: inventory-volume
+        configMap:
+          name: ota-inventory
