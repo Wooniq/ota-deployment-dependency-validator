@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"fmt"
 
 	"github.com/Wooniq/ota-agent/pkg/repository"
 	"github.com/Wooniq/ota-agent/pkg/service"
@@ -28,6 +29,10 @@ func main() {
 		os.Getenv("HANA_USER"),
 		os.Getenv("HANA_PASSWORD"),
 	)
+	
+	fmt.Println("DEBUG: HANA_ADDRESS =", os.Getenv("HANA_ADDRESS"))
+	fmt.Println("DEBUG: HANA_PORT =", os.Getenv("HANA_PORT"))
+	
 	if err != nil {
 		log.Fatalf("관제 시스템 구동 실패: %v", err)
 	}

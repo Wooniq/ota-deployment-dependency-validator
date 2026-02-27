@@ -23,7 +23,7 @@ func main() {
 	// 2. 브로커 주소 환경 변수화
 	broker := os.Getenv("BROKER_URL")
 	if broker == "" {
-		broker = "tcp://localhost:1883"
+		broker = "tcp://localhost:1885"
 	}
 
 	// 3. Graceful Shutdown을 위한 컨텍스트 설정
