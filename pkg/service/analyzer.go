@@ -21,14 +21,48 @@ type OTAAnalyzer struct {
 	Repo       *repository.HANARepository
 	TargetADAS string
 	TargetBMS  string
+	dataChan   chan repository.VehicleInfo // 분석 완료된 데이터를 담는 통로
+	batchSize  int                         // 한 번에 저장할 단위 (100개)
 }
 
 // NewOTAAnalyzer : 분석기 생성자
 func NewOTAAnalyzer(repo *repository.HANARepository, adasVer, bmsVer string) *OTAAnalyzer {
-	return &OTAAnalyzer{
+	a := &OTAAnalyzer{
 		Repo:       repo,
 		TargetADAS: adasVer,
 		TargetBMS:  bmsVer,
+		dataChan:   make(chan repository.VehicleInfo, 2000), // 넉넉한 버퍼
+		batchSize:  100,                                     // 100개씩 모아서 저장
+	}
+
+	// [핵심] 백그라운드에서 데이터를 HANA DB로 넘겨주는 워커 가동
+	go a.startHanaBatchWorker()
+
+	return a
+}
+
+// startHanaBatchWorker: 채널에 쌓인 데이터를 모아서 HANA DB에 Bulk Insert 수행
+func (a *OTAAnalyzer) startHanaBatchWorker() {
+	var batch []repository.VehicleInfo
+	ticker := time.NewTicker(3 * time.Second) // 데이터가 적어도 3초마다 강제 저장
+
+	log.Println("[Service] HANA DB Batch Worker 가동 시작")
+
+	for {
+		select {
+		case entity := <-a.dataChan:
+			batch = append(batch, entity)
+			if len(batch) >= a.batchSize {
+				a.flush(batch)
+				batch = nil // 배치 초기화
+			}
+
+		case <-ticker.C:
+			if len(batch) > 0 {
+				a.flush(batch)
+				batch = nil
+			}
+		}
 	}
 }
 
@@ -107,10 +141,10 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 		}
 	}
 
-	// 2. [ADR 0002] 상세 분석 수행 (추출한 batterySOH 사용)
+	// 2. 상세 분석 수행
 	status, needsUpdate := s.performDeepAnalysis(ecuInventory["ADAS"], ecuInventory["BMS"], batterySOH)
 
-	// 3. Entity 생성 및 저장
+	// 3. Entity 생성
 	entity := repository.VehicleInfo{
 		VIN:          vin,
 		HWVersion:    ecuInventory["HW"],
@@ -118,16 +152,13 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 		BMSVersion:   ecuInventory["BMS"],
 		UpdateStatus: status,
 		RegionCode:   "KR",
-		BatterySOH:   batterySOH, // 파싱된 실측 데이터 적재
+		BatterySOH:   batterySOH,
 		LastReported: time.Now(),
 		NeedsUpdate:  needsUpdate,
 	}
 
-	if err := s.Repo.UpsertVehicle(entity); err != nil {
-		return fmt.Errorf("HANA DB 저장 실패: %w", err)
-	}
-
-	log.Printf("[Success] VIN:%s 분석 및 HANA DB 저장 완료 (Status:%s)", vin, status)
+	// DB를 직접 찌르지 않고 채널에 전송하여 즉시 리턴
+	s.dataChan <- entity
 
 	return nil
 }
@@ -151,4 +182,20 @@ func (s *OTAAnalyzer) performDeepAnalysis(adasVer, bmsVer string, soh float64) (
 
 	// 최신 버전인 경우
 	return repository.StatusSuccess, false
+}
+
+// flush: 채널에 모인 데이터를 실제 Repository의 Bulk Insert 기능을 통해 저장
+func (a *OTAAnalyzer) flush(batch []repository.VehicleInfo) {
+	if len(batch) == 0 {
+		return
+	}
+
+	// Repository에 대량 저장 요청
+	if err := a.Repo.BulkUpsertVehicles(batch); err != nil {
+		log.Printf("[Error] HANA Bulk 적재 실패: %v", err)
+		// 실패 시 로깅하거나 재시도 로직을 고려할 수 있습니다.
+		return
+	}
+
+	log.Printf("[HANA] %d건의 차량 데이터 배치 적재 성공 (Worker ID: %d)", len(batch), time.Now().UnixNano()%100)
 }
