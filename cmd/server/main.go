@@ -16,9 +16,9 @@ import (
 
 func main() {
 	// 1. .env 파일 로드
-	err := godotenv.Load()
+	err := godotenv.Load("../../.env")
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		err = godotenv.Load(".env")
 	}
 
 	// 2. [Repository] 환경 변수를 사용하여 HANA DB 연결
