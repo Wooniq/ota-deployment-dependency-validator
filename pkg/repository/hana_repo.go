@@ -141,3 +141,77 @@ func (r *HANARepository) Close() error {
 	}
 	return nil
 }
+
+// BulkUpsertVehicles : 대량의 차량 상태 데이터를 HANA DB에 고속 적재합니다.
+func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
+	if len(batch) == 0 {
+		return nil
+	}
+
+	// 1. 트랜잭션 시작
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("HANA 트랜잭션 시작 실패: %w", err)
+	}
+	// 에러 발생 시 롤백 (정상 Commit 시에는 영향 없음)
+	defer tx.Rollback()
+
+	// 2. SAP HANA 전용 UPSERT 구문 준비 (Vehicle_ECU_Inventory 테이블 대상)
+	query := `UPSERT "Vehicle_ECU_Inventory" (
+       "VEHICLE_ID", 
+       "ECU_TYPE", 
+       "HW_VERSION", 
+       "SW_MAJOR_V", 
+       "BATTERY_SOH", 
+       "LAST_REPORTED_AT"
+    ) VALUES (?, ?, ?, ?, ?, ?) WITH PRIMARY KEY`
+
+	// 3. 구문 준비 (tx.Prepare)
+	stmt, err := tx.Prepare(query)
+	if err != nil {
+		return fmt.Errorf("UPSERT 구문 Prepare 실패: %w", err)
+	}
+	defer stmt.Close()
+
+	// 3. 루프를 돌며 Batch 실행
+	for _, v := range batch {
+		// VIN 대신 VEHICLE_ID를 사용해야 하므로, 실무에서는 VIN으로 ID를 조회하는 로직이 필요하지만
+		// 시뮬레이션 효율을 위해 VIN의 뒷자리 숫자를 ID로 변환하여 예시를 작성합니다.
+		vehicleID := extractIDFromVIN(v.VIN)
+
+		_, err := stmt.Exec(
+			vehicleID,
+			"ADAS", // 혹은 제어기 타입에 맞는 로직
+			v.HWVersion,
+			parseMajorVersion(v.ADASVersion),
+			v.BatterySOH,
+			v.LastReported,
+		)
+		if err != nil {
+			return fmt.Errorf("Exec 실패 (VIN: %s): %w", v.VIN, err)
+		}
+	}
+
+	// 4. 최종 커밋
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("HANA 트랜잭션 커밋 실패: %w", err)
+	}
+
+	return nil
+}
+
+// 간단한 도우미 함수들 (실제 로직에 맞게 수정 필요)
+func extractIDFromVIN(vin string) int64 {
+	// VIN 문자열에서 숫자만 추출하거나 해시화하여 BIGINT ID 생성
+	// 여기서는 시뮬레이션 편의를 위해 뒷자리 사용 예시
+	var id int64
+	fmt.Sscanf(vin[len(vin)-4:], "%d", &id)
+	return id
+}
+
+func parseMajorVersion(version string) int {
+	// "v2.2.2" -> 2 추출 로직
+	var major int
+	fmt.Sscanf(version, "v%d", &major)
+	return major
+}

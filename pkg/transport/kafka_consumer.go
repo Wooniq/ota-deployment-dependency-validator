@@ -27,10 +27,9 @@ func NewKafkaConsumer(brokers []string, topic, groupID string) *KafkaConsumer {
 	}
 }
 
-// StartConsuming : 무한 루프를 돌며 메시지를 가져와 분석기로 전달
+// 비동기 (고루틴 활용) 분석
 func (kc *KafkaConsumer) StartConsuming(ctx context.Context, analyzer *service.OTAAnalyzer) {
 	defer kc.Reader.Close()
-
 	log.Println("[Kafka] Consumer 가동 시작...")
 
 	for {
@@ -40,12 +39,13 @@ func (kc *KafkaConsumer) StartConsuming(ctx context.Context, analyzer *service.O
 			break
 		}
 
-		log.Printf("[Kafka] 메시지 수신 - Topic: %s, Partition: %d, Offset: %d", m.Topic, m.Partition, m.Offset)
-
-		// [ADR 0001] 분석 엔진 호출 (바이너리 데이터 해석 및 E1 체크)
-		vin := string(m.Key)
-		if err := analyzer.AnalyzeAndSaveBinary(vin, m.Value); err != nil {
-			log.Printf("[Error] 데이터 분석/저장 실패 (VIN: %s): %v", vin, err)
-		}
+		// 핵심 수정: 각 메시지 처리를 고루틴으로 분리 (비동기 처리)
+		go func(msg kafka.Message) {
+			vin := string(msg.Key)
+			// 만약 Key가 비어있다면 Payload에서 VIN을 추출하는 로직이 필요할 수 있습니다.
+			if err := analyzer.AnalyzeAndSaveBinary(vin, msg.Value); err != nil {
+				log.Printf("[Error] 데이터 분석/저장 실패 (VIN: %s): %v", vin, err)
+			}
+		}(m)
 	}
 }
