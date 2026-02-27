@@ -1,0 +1,33 @@
+# 관제 서버 배포용 (Deployment)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ota-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ota-server
+  template:
+    metadata:
+      labels:
+        app: ota-server
+    spec:
+      containers:
+        - name: ota-server
+          image: ota-server:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: DB_URL
+              value: "postgres://user:pass@ev-postgres:5432/ota"
+            - name: MQTT_BROKER
+              value: "tcp://192.168.56.1:1883"
