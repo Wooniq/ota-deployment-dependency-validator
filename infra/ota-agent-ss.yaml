@@ -26,7 +26,7 @@ spec:
 
       containers:
       - name: ota-agent
-        image: ota-agent:v4
+        image: 192.168.56.109:5000/ota-agent:v4
         imagePullPolicy: IfNotPresent
         env:
         - name: BROKER_URL

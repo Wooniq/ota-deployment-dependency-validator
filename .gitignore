@@ -70,6 +70,7 @@ frontend/dashboard/yarn-error.log*
 # 가상 데이터
 data/inventory/
 data/inventory/*.json
+cmd/data/inventory/
 
 # Infrastructure Data & Logs
 infra/mosquitto/data/
