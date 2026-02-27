@@ -1,4 +1,6 @@
 #!/bin/bash
+# 실행 위치를 스크립트가 있는 폴더로 고정하고 루트로 이동
+cd "$(dirname "$0")/.."
 
 # 1. 차량 데이터 생성 (Python 실행)
 echo "🚀 Generating 1,000 vehicle data files..."
@@ -12,9 +14,9 @@ kubectl delete configmap ota-inventory --ignore-not-found
 echo "📦 Creating ConfigMap from generated data..."
 kubectl create configmap ota-inventory --from-file=data/inventory/
 
-# 4. StatefulSet 배포 (또는 재기동)
+# 4. StatefulSet 배포 (infra 폴더 안의 yaml 참조)
 echo "⚓ Deploying ota-agent StatefulSet..."
-kubectl apply -f ota-agent-ss.yaml
+kubectl apply -f infra/ota-agent-ss.yaml
 
 # 5. 변경사항 반영을 위한 롤아웃 (이미 배포 중일 경우)
 kubectl rollout restart statefulset ota-agent
