@@ -4,38 +4,58 @@ metadata:
   name: ota-agent
 spec:
   serviceName: "ota-agent"
-  replicas: 1000  # 1,000대 가상 차량 생성
+  replicas: 1000
   podManagementPolicy: Parallel
+
   selector:
     matchLabels:
       app: ota-agent
+
   template:
     metadata:
       labels:
         app: ota-agent
+
     spec:
+      # [변경] Tolerations를 삭제했습니다. 
+      # 이제 마스터 노드의 Taint를 통과하지 못하므로 워커에만 배포됩니다.
+
       containers:
-        - name: ota-agent
-          image: docker.io/library/ota-agent:v4
-          volumeMounts:
-          - name: inventory-volume
-            mountPath: /etc/ota
-          imagePullPolicy: Never  # 로컬 빌드 이미지만 사용
-          resources:
-            requests:
-              memory: "8Mi"  # 1,000대 수용을 위해 자원 최소화
-              cpu: "5m"
-            limits:
-              memory: "16Mi"
-              cpu: "20m"
-          env:
-            - name: BROKER_URL
-              value: "tcp://192.168.56.1:1883"  # 호스트 PC의 MQTT 브로커 주소
-            - name: MY_POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name  # 각 Pod의 고유 이름을 앱에서 VIN으로 사용 가능
+      - name: ota-agent
+        image: ota-agent:v4
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: BROKER_URL
+          value: "tcp://192.168.56.1:1883"
+        - name: MY_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 5m
+            memory: 8Mi
+          limits:
+            cpu: 20m
+            memory: 16Mi
+        volumeMounts:
+        - name: inventory-volume
+          mountPath: /etc/ota
+        - name: agent-data
+          mountPath: /var/lib/ota-agent
+
       volumes:
       - name: inventory-volume
         configMap:
           name: ota-inventory
+      - name: agent-data
+        emptyDir:
+          sizeLimit: 50Mi
+
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: ota-agent
