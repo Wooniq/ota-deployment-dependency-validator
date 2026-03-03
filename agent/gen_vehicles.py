@@ -8,7 +8,7 @@ current_script_path = os.path.abspath(__file__)
 # 2. 스크립트가 속한 폴더(agent/) 추출
 current_dir = os.path.dirname(current_script_path)
 # 3. 한 단계 위인 루트 폴더 아래의 data/inventory 경로 설정
-DATA_DIR = os.path.join(current_dir, "../cmd", "data", "inventory")
+DATA_DIR = os.path.join(current_dir, "..", "data", "inventory")
 
 # 경로 정규화 (../ 등을 깔끔하게 정리)
 DATA_DIR = os.path.normpath(DATA_DIR)
