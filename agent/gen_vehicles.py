@@ -46,7 +46,7 @@ def generate_vehicles(count=1000):
     for i in range(1, count + 1):
         file_name = f"vehicle_{i:04d}.json"
 
-        # 차량마다 무작위로 2~5개의 ECU 장착
+        # 차량마다 무작위로 2~4개의 ECU 장착
         selected_ecus = random.sample(ecu_pool, random.randint(2, 4))
 
         ecu_info_list = []
@@ -59,8 +59,13 @@ def generate_vehicles(count=1000):
                 "sw_version": sw_version
             })
 
+        # soh 필드 추가
+        # 업데이트 가능 상태(0.3 이상)를 보장하기 위해 0.85~0.99 사이의 값 생성
+        soh_value = round(random.uniform(0.85, 0.99), 2)
+
         vehicle_data = {
             "vin": generate_vin(i),
+            "soh": soh_value,
             "ecus": ecu_info_list
         }
 
