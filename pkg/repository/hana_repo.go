@@ -4,15 +4,17 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
-	"strconv" // VIN 변환용
+	"strconv"
 
 	_ "github.com/SAP/go-hdb/driver"
 )
 
+// HANARepository: SAP HANA DB 연결 및 쿼리 실행 객체
 type HANARepository struct {
 	db *sql.DB
 }
 
+// NewHANARepository: DB 연결 및 가용성 확인
 func NewHANARepository(host, port, user, password string) (*HANARepository, error) {
 	dsn := fmt.Sprintf("hdb://%s:%s@%s:%s", user, password, host, port)
 	db, err := sql.Open("hdb", dsn)
@@ -26,6 +28,7 @@ func NewHANARepository(host, port, user, password string) (*HANARepository, erro
 	return &HANARepository{db: db}, nil
 }
 
+// BulkUpsertVehicles: 다수 차량의 상태 데이터를 일괄적으로 UPSERT 수행
 func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 	if len(batch) == 0 {
 		return nil
@@ -37,6 +40,7 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 	}
 	defer tx.Rollback()
 
+	// 스키마(Level 1) 규격에 맞춘 UPSERT 쿼리
 	query := `UPSERT "Vehicle_ECU_Inventory" (
 		"VEHICLE_ID", 
 		"ECU_TYPE", 
@@ -56,7 +60,7 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 	defer stmt.Close()
 
 	for _, v := range batch {
-		// VIN(문자열)에서 마지막 숫자들을 추출해 VEHICLE_ID(BIGINT) 생성
+		// VIN 문자열에서 마지막 숫자 그룹을 추출하여 BIGINT 타입의 VEHICLE_ID 생성
 		vehicleID := extractIDFromVIN(v.VIN)
 
 		_, err := stmt.Exec(
@@ -67,7 +71,7 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 			v.SWMinor,    // 5. SW_MINOR_V
 			v.SWPatch,    // 6. SW_PATCH_V
 			v.BatterySOH, // 7. BATTERY_SOH
-			12.6,         // 8. BATTERY_VOLTAGE (임시 기본값)
+			12.6,         // 8. BATTERY_VOLTAGE (Safety check 기준 전압)
 		)
 		if err != nil {
 			return fmt.Errorf("Exec 실패 (ID: %d): %w", vehicleID, err)
@@ -77,14 +81,13 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 	return tx.Commit()
 }
 
-// extractIDFromVIN: 문자열에서 숫자만 추출하여 BIGINT로 변환
+// extractIDFromVIN: VIN 내 숫자 패턴을 BIGINT로 변환하여 PK 정합성 확보
 func extractIDFromVIN(vin string) int64 {
-	// 정규식을 사용하여 문자열 내의 숫자 부분만 추출합니다.
 	re := regexp.MustCompile(`[0-9]+`)
 	matches := re.FindAllString(vin, -1)
 
 	if len(matches) > 0 {
-		// 마지막 숫자 그룹(예: 0001)을 가져와 변환
+		// 명명 규칙에 따라 마지막 숫자 시퀀스를 ID로 식별
 		fullDigits := matches[len(matches)-1]
 		id, _ := strconv.ParseInt(fullDigits, 10, 64)
 		return id
@@ -92,6 +95,7 @@ func extractIDFromVIN(vin string) int64 {
 	return 0
 }
 
+// Close: DB 연결 종료
 func (r *HANARepository) Close() error {
 	if r.db != nil {
 		return r.db.Close()

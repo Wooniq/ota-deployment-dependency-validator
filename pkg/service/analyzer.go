@@ -36,7 +36,7 @@ func NewOTAAnalyzer(repo *repository.HANARepository, adasVer, bmsVer string) *OT
 	return a
 }
 
-// AnalyzeAndSave: JSON 형식의 인벤토리 데이터를 파싱하여 ECU별로 정규화 후 채널에 전달함
+// AnalyzeAndSave: JSON 형식의 데이터를 파싱하여 ECU별로 정규화 후 채널에 전달함
 func (s *OTAAnalyzer) AnalyzeAndSave(vin, payload string) error {
 	var dto repository.VehicleInventoryDTO
 	if err := json.Unmarshal([]byte(payload), &dto); err != nil {
@@ -72,24 +72,24 @@ func (s *OTAAnalyzer) AnalyzeAndSave(vin, payload string) error {
 	return nil
 }
 
-// AnalyzeAndSaveBinary: DLT 규격의 바이너리 페이로드에서 SOH와 ECU 버전 정보를 정규식으로 추출함
+// AnalyzeAndSaveBinary: Autosar DLT 표준(BigEndian)에 따라 바이너리를 해석하고 정규식으로 ECU 정보를 추출함
 func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) error {
 	if len(payload) < 21 {
 		return fmt.Errorf("데이터 길이 부족")
 	}
 
-	// SOH 추출: 페이로드 마지막 4바이트를 IEEE 754 float32(BigEndian)로 해석
+	// SOH 추출: DLT 표준에 따라 마지막 4바이트를 BigEndian IEEE 754 float32로 해석
 	sohOffset := len(payload) - 4
-	sohRaw := binary.BigEndian.Uint32(payload[sohOffset:])
+	sohRaw := binary.BigEndian.Uint32(payload[sohOffset:]) // BigEndian 고정
 	batterySOH := float64(math.Float32frombits(sohRaw))
 
-	// ECU 정보 추출: 정규식을 활용하여 텍스트 데이터 내 ECU 명칭 및 버전 식별
+	// ECU 정보 추출: 정규식을 활용하여 텍스트 내 ECU 명칭 및 버전 식별 (데이터 밀림 방지)
 	rawText := string(payload[:sohOffset])
 	re := regexp.MustCompile(`(BMS|ADAS|ICU|TCU)\s+v?(\d+)\.(\d+)\.(\d+)`)
 	matches := re.FindAllStringSubmatch(rawText, -1)
 
 	if len(matches) == 0 {
-		return fmt.Errorf("정규식 매칭 실패 (Raw: %s)", rawText)
+		return fmt.Errorf("DLT 텍스트 파싱 실패 (Raw: %s)", rawText)
 	}
 
 	for _, match := range matches {
@@ -118,7 +118,7 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 	return nil
 }
 
-// startHanaBatchWorker: 채널에 쌓인 데이터를 모아 주기적으로 SAP HANA DB에 벌크 적재함
+// startHanaBatchWorker: 채널 데이터를 모아 주기적으로 SAP HANA DB에 벌크 적재함
 func (a *OTAAnalyzer) startHanaBatchWorker() {
 	var batch []repository.VehicleInfo
 	ticker := time.NewTicker(3 * time.Second)
@@ -140,16 +140,16 @@ func (a *OTAAnalyzer) startHanaBatchWorker() {
 	}
 }
 
-// flush: 실제 DB 리포지토리를 호출하여 데이터를 저장함
+// flush: 리포지토리를 호출하여 메모리 상의 배치를 실제 DB에 UPSERT 함
 func (a *OTAAnalyzer) flush(batch []repository.VehicleInfo) {
 	if err := a.Repo.BulkUpsertVehicles(batch); err != nil {
 		log.Printf("[Error] HANA Bulk 적재 실패: %v", err)
 	}
 }
 
-// performDeepAnalysis: 배터리 상태 및 소프트웨어 버전을 비교하여 업데이트 적격성을 판별함
+// performDeepAnalysis: 배터리 상태 및 버전을 비교하여 업데이트 적격성을 판별함
 func (s *OTAAnalyzer) performDeepAnalysis(adasVer, bmsVer string, soh float64) (repository.StatusCode, bool) {
-	// 배터리 SOH 0.3 미만일 경우 안전을 위해 업데이트 차단
+	// 배터리 SOH 0.3 미만일 경우 안전을 위해 업데이트 대상에서 제외
 	if soh < 0.3 {
 		return repository.StatusBatteryLow, false
 	}
@@ -161,7 +161,7 @@ func (s *OTAAnalyzer) performDeepAnalysis(adasVer, bmsVer string, soh float64) (
 	return repository.StatusSuccess, false
 }
 
-// parseVersionParts: 버전 문자열(vX.Y.Z)을 정수형 필드로 분리함
+// parseVersionParts: 버전 문자열(vX.Y.Z)을 정수 필드로 분리함
 func parseVersionParts(v string) (int, int, int) {
 	v = strings.TrimPrefix(v, "v")
 	p := strings.Split(v, ".")
