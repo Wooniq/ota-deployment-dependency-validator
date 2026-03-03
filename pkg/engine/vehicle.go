@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -46,67 +47,106 @@ func (v *Vehicle) VerifyFirmware(filePath string, expectedHash string) (bool, er
 }
 
 // 2. 업데이트 이벤트 핸들러
-func (v *Vehicle) OnUpdateReceived(filePath string, expectedHash string) {
-	log.Printf("[%s] OTA 패키지 수신: %s", v.VIN, filePath)
+func (v *Vehicle) OnUpdateReceived(vin string, filePath string, expectedHash string) {
+	log.Printf("[%s] OTA 패키지 수신: %s", vin, filePath)
 
 	// 무결성 검증 수행
 	success, err := v.VerifyFirmware(filePath, expectedHash)
 
 	if err != nil || !success {
 		// transport 패키지의 도구를 호출하여 에러 보고
-		transport.SendStatus(v.Client, v.VIN, "ERR_HASH_MISMATCH")
+		transport.SendStatus(v.Client, vin, "ERR_HASH_MISMATCH")
 		return
 	}
 
 	// 성공 시 보고
-	transport.SendStatus(v.Client, v.VIN, "SUCCESS_VERIFIED")
+	transport.SendStatus(v.Client, vin, "SUCCESS_VERIFIED")
 }
 
-// 3. 업데이트 명령 구독 설정
-func (v *Vehicle) setupUpdateSubscriber() {
-	topic := fmt.Sprintf("ota/command/%s", v.VIN)
-	v.Client.Subscribe(topic, 1, func(client mqtt.Client, msg mqtt.Message) {
-		var cmd struct {
-			FilePath     string `json:"file_path"`
-			ExpectedHash string `json:"expected_hash"`
-		}
-		if err := json.Unmarshal(msg.Payload(), &cmd); err != nil {
-			log.Printf("[%s] Payload Parsing Error: %v", v.VIN, err)
-			return
-		}
-		// 논블로킹 실행: 검증 중에도 상태 보고 루프가 멈추지 않도록 격리
-		go v.OnUpdateReceived(cmd.FilePath, cmd.ExpectedHash)
-	})
-	log.Printf("[%s] MQTT 구독 활성화: %s", v.VIN, topic)
-}
-
-// 4. Start: 에이전트 메인 루프 (1대 독립 실행형)
+// 4. Start: 1,000대 동시 접속 시뮬레이션 모드로 수정
 func (v *Vehicle) Start(ctx context.Context) {
-	// 업데이트 명령 대기 시작
-	v.setupUpdateSubscriber()
+	inventoryDir := "data/inventory"
+
+	// 1. 폴더 내 모든 파일 읽기
+	files, err := os.ReadDir(inventoryDir)
+	if err != nil {
+		log.Fatalf("Inventory 폴더를 읽을 수 없습니다: %v", err)
+	}
+
+	log.Printf("=== [Massive Connection Mode] %d대 차량 동시 접속 시작 ===", len(files))
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	baseDelay := 10 * time.Second
 
-	// K8s 환경에서 각 Pod에 마운트된 고유 인벤토리 경로
-	configPath := "/etc/ota/inventory.json"
+	for _, file := range files {
+		if filepath.Ext(file.Name()) == ".json" {
+			configPath := filepath.Join(inventoryDir, file.Name())
+
+			// 2. 각 차량별로 새로운 고루틴 실행 (폭주 시뮬레이션)
+			go func(path string) {
+				// 각 가상 차량의 고유 클라이언트 생성 및 구동 로직
+				// (실제 대규모 테스트 시에는 각 차량 객체가 별도의 MQTT Client를 가져야 함)
+				v.runVirtualVehicle(ctx, path, r)
+			}(configPath)
+
+			// 3. 접속 폭주 시 브로커 부하를 조절하기 위한 미세 지연 (Thundering Herd 방지)
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// 메인 루프 유지
+	<-ctx.Done()
+}
+
+// 개별 차량의 독립 실행 루틴
+func (v *Vehicle) runVirtualVehicle(ctx context.Context, configPath string, r *rand.Rand) {
+	baseDelay := 30 * time.Second // 보고 주기 (1,000대이므로 조금 늘림)
+
+	// 파일에서 VIN 로드 (각 차량의 정체성 확인)
+	inv, err := collector.LoadInventory(configPath)
+	if err != nil {
+		return
+	}
+
+	currentVIN := inv.VIN
+	log.Printf("[%s] 가상 차량 접속 완료", currentVIN)
+
+	// 이 차량의 명령 구독 설정
+	// 주의: v.VIN을 currentVIN으로 동적 처리하도록 코드 수정 필요
+	v.setupSpecificUpdateSubscriber(currentVIN)
 
 	for {
-		// 인벤토리 수집 및 DLT 패킷 전송
+		// 인벤토리 수집 및 전송
 		inv, err := collector.LoadInventory(configPath)
 		if err == nil {
-			v.sendDltInventory(inv)
-		} else {
-			log.Printf("[%s] Inventory Load Error: %v", v.VIN, err)
+			v.sendDltInventory(inv) // 내부에서 binary 전송
 		}
 
-		// Thundering Herd 방지를 위한 랜덤 지터 적용 대기
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(v.getNextJitterDelay(r, baseDelay)):
 		}
 	}
+}
+
+// 각 가상 차량의 고유 VIN으로 명령 구독
+func (v *Vehicle) setupSpecificUpdateSubscriber(vin string) {
+	topic := fmt.Sprintf("ota/command/%s", vin)
+
+	v.Client.Subscribe(topic, 1, func(client mqtt.Client, msg mqtt.Message) {
+		var cmd struct {
+			FilePath     string `json:"file_path"`
+			ExpectedHash string `json:"expected_hash"`
+		}
+		if err := json.Unmarshal(msg.Payload(), &cmd); err != nil {
+			log.Printf("[%s] Payload Parsing Error: %v", vin, err)
+			return
+		}
+		// 개별 VIN 컨텍스트를 유지하며 업데이트 핸들러 실행
+		go v.OnUpdateReceived(vin, cmd.FilePath, cmd.ExpectedHash)
+	})
+
+	log.Printf("[%s] MQTT 구독 활성화: %s", vin, topic)
 }
 
 // 5. [내부 헬퍼] DLT 바이너리 조립 및 전송 로직
@@ -146,11 +186,11 @@ func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
 		// 전송용 슬라이스 복사 (고루틴 안전성 확보)
 		sendData := make([]byte, len(binaryData))
 		copy(sendData, binaryData)
-		go transport.SendToBroker(v.Client, v.VIN, sendData)
+		go transport.SendToBroker(v.Client, inv.VIN, sendData)
 	}
 
 	fmt.Printf("[%s] [Optimization-Log] Binary Payload Size: %d bytes (JSON 대비 %d%% 절감)\n",
-		v.VIN, len(binaryData), 100-(len(binaryData)*100/210))
+		inv.VIN, len(binaryData), 100-(len(binaryData)*100/210))
 }
 
 // [헬퍼] 버전 문자열을 정수형 바이트로 파싱
@@ -172,13 +212,16 @@ func (v *Vehicle) getNextJitterDelay(r *rand.Rand, base time.Duration) time.Dura
 	return base + jitter
 }
 
-func (v *Vehicle) reportStatus(status string) {
-	topic := fmt.Sprintf("ota/status/%s", v.VIN)
+func (v *Vehicle) reportStatus(vin string, status string) {
+	topic := fmt.Sprintf("ota/status/%s", vin)
 	payload := map[string]string{
-		"vin":       v.VIN,
+		"vin":       vin,
 		"status":    status,
 		"timestamp": time.Now().Format(time.RFC3339),
 	}
+
 	data, _ := json.Marshal(payload)
-	v.Client.Publish(topic, 1, false, data)
+
+	// 비동기 전송 (1,000대 폭주 시 병목 방지)
+	go v.Client.Publish(topic, 1, false, data)
 }

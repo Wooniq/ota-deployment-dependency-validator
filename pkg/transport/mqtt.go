@@ -67,15 +67,20 @@ func SendStatus(client mqtt.Client, vin string, status string) {
 		return
 	}
 
-	// 상태 보고 전용 토픽 구조
+	// 서버 측 분석 엔진이 인식할 수 있도록 JSON 페이로드 구성
 	topic := fmt.Sprintf("ota/vehicles/%s/status", vin)
 
-	// 이력 관리는 중요하므로 QoS 1을 사용하여 전달 보장
-	token := client.Publish(topic, 1, false, status)
+	// 타임스탬프를 포함하여 서버에서 지연 시간을 계산할 수 있게 함
+	payload := fmt.Sprintf(`{"vin":"%s", "status":"%s", "timestamp":"%s"}`,
+		vin, status, time.Now().Format(time.RFC3339))
 
+	// 이력 관리는 중요하므로 QoS 1을 사용하여 전달 보장
+	token := client.Publish(topic, 1, false, payload)
+
+	// 전송 모니터링 (비동기)
 	go func() {
 		if token.WaitTimeout(3*time.Second) && token.Error() != nil {
-			// 실패 시 로깅 로직
+			// 실패 시 재시도 로직이나 에러 로그를 남길 수 있음
 		}
 	}()
 }
