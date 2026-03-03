@@ -42,16 +42,18 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 
 	// 스키마(Level 1) 규격에 맞춘 UPSERT 쿼리
 	query := `UPSERT "Vehicle_ECU_Inventory" (
-		"VEHICLE_ID", 
-		"ECU_TYPE", 
-		"HW_VERSION", 
-		"SW_MAJOR_V", 
-		"SW_MINOR_V", 
-		"SW_PATCH_V", 
-		"BATTERY_SOH", 
-		"BATTERY_VOLTAGE", 
-		"LAST_REPORTED_AT"
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) WITH PRIMARY KEY`
+		"VIN",
+		"ECUType",
+		"HWVersion",
+		"SWMajor",
+		"SWMinor",
+		"SWPatch",
+		"BatterySOH",
+		"LastReported",
+		"UpdateStatus",
+		"RegionCode",
+		"NeedsUpdate"
+	) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?) WITH PRIMARY KEY`
 
 	stmt, err := tx.Prepare(query)
 	if err != nil {
