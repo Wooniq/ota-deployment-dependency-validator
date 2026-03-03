@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"time"
@@ -110,7 +112,7 @@ func (v *Vehicle) Start(ctx context.Context) {
 func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
 	var payloadBuf bytes.Buffer
 
-	// VIN: 17바이트 고정 폭 직렬화 (공백 패딩)
+	// 1. VIN 직렬화
 	vinBytes := make([]byte, 17)
 	for i := range vinBytes {
 		vinBytes[i] = ' '
@@ -118,7 +120,7 @@ func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
 	copy(vinBytes, inv.VIN)
 	payloadBuf.Write(vinBytes)
 
-	// ECUs: 고정 폭 필드로 직렬화 (Autosar 표준 모사)
+	// 2. ECU 정보 직렬화 (Autosar 표준 모사)
 	for _, ecu := range inv.ECUs {
 		// ECU ID: 4바이트 고정 (예: BMS , ADAS)
 		ecuIDField := make([]byte, 4)
@@ -132,7 +134,13 @@ func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
 		payloadBuf.WriteString(ecu.SWVersion + "\x00")
 	}
 
-	// Autosar DLT 표준 패킷 생성 ("ICU " 컨텍스트 사용)
+	// SOH 데이터를 마지막에 4바이트 BigEndian으로 삽입
+	sohBytes := make([]byte, 4)
+	// Autosar DLT 표준 가이드에 따라 BigEndian 적용
+	binary.BigEndian.PutUint32(sohBytes, math.Float32bits(float32(inv.SOH)))
+	payloadBuf.Write(sohBytes)
+
+	// 3. DLT 패킷 생성 및 전송
 	binaryData, err := protocol.CreateDltPacket("ICU ", "INV ", payloadBuf.Bytes())
 	if err == nil {
 		// 비동기 전송으로 메인 루프 지연 방지
