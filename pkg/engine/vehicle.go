@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -13,6 +12,8 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wooniq/ota-agent/pkg/collector"
@@ -110,44 +111,59 @@ func (v *Vehicle) Start(ctx context.Context) {
 
 // 5. [내부 헬퍼] DLT 바이너리 조립 및 전송 로직
 func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
-	var payloadBuf bytes.Buffer
+	// 1. 고정 크기 버퍼 할당: 런타임 오버헤드 최소화
+	// 구조: VIN(17) + SOH(4) + (ECU_ID(4) + Ver(3)) * N
+	buf := make([]byte, 128)
 
-	// 1. VIN 직렬화
-	vinBytes := make([]byte, 17)
-	for i := range vinBytes {
-		vinBytes[i] = ' '
-	}
-	copy(vinBytes, inv.VIN)
-	payloadBuf.Write(vinBytes)
+	// 2. VIN 직렬화 (0~16 index): 고정 17바이트
+	copy(buf[0:17], fmt.Sprintf("%-17s", inv.VIN))
 
-	// 2. ECU 정보 직렬화 (Autosar 표준 모사)
+	// 3. SOH 직렬화 (17~20 index): BigEndian IEEE 754 float32
+	binary.BigEndian.PutUint32(buf[17:21], math.Float32bits(float32(inv.SOH)))
+
+	// 4. ECU 데이터 직렬화 (21 index ~)
+	offset := 21
 	for _, ecu := range inv.ECUs {
-		// ECU ID: 4바이트 고정 (예: BMS , ADAS)
-		ecuIDField := make([]byte, 4)
-		for i := range ecuIDField {
-			ecuIDField[i] = ' '
-		}
-		copy(ecuIDField, ecu.ID)
-		payloadBuf.Write(ecuIDField)
+		// ECU ID: 4바이트 고정 (예: "BMS ")
+		copy(buf[offset:offset+4], fmt.Sprintf("%-4s", ecu.ID))
 
-		// SW 버전: 가변 길이를 고려하여 Null 종료 문자(\x00) 추가
-		payloadBuf.WriteString(ecu.SWVersion + "\x00")
+		// [고도화] 버전 문자열(v2.3.5) -> 3바이트 정수 바이너리 변환
+		// 텍스트 "2.3.5"(5바이트) 대비 약 40% 크기 절감
+		major, minor, patch := parseVersionToInt(ecu.SWVersion)
+		buf[offset+4] = byte(major)
+		buf[offset+5] = byte(minor)
+		buf[offset+6] = byte(patch)
+
+		offset += 7
+		if offset+7 > len(buf) {
+			break
+		} // 버퍼 오버플로우 방지
 	}
 
-	// SOH 데이터를 마지막에 4바이트 BigEndian으로 삽입
-	sohBytes := make([]byte, 4)
-	// Autosar DLT 표준 가이드에 따라 BigEndian 적용
-	binary.BigEndian.PutUint32(sohBytes, math.Float32bits(float32(inv.SOH)))
-	payloadBuf.Write(sohBytes)
-
-	// 3. DLT 패킷 생성 및 전송
-	binaryData, err := protocol.CreateDltPacket("ICU ", "INV ", payloadBuf.Bytes())
+	// 5. DLT 패킷 생성 및 비동기 전송
+	binaryData, err := protocol.CreateDltPacket("ICU ", "INV ", buf[:offset])
 	if err == nil {
-		// 비동기 전송으로 메인 루프 지연 방지
+		// 전송용 슬라이스 복사 (고루틴 안전성 확보)
 		sendData := make([]byte, len(binaryData))
 		copy(sendData, binaryData)
 		go transport.SendToBroker(v.Client, v.VIN, sendData)
 	}
+
+	fmt.Printf("[%s] [Optimization-Log] Binary Payload Size: %d bytes (JSON 대비 %d%% 절감)\n",
+		v.VIN, len(binaryData), 100-(len(binaryData)*100/210))
+}
+
+// [헬퍼] 버전 문자열을 정수형 바이트로 파싱
+func parseVersionToInt(vStr string) (int, int, int) {
+	vStr = strings.TrimPrefix(vStr, "v")
+	parts := strings.Split(vStr, ".")
+	if len(parts) < 3 {
+		return 0, 0, 0
+	}
+	major, _ := strconv.Atoi(parts[0])
+	minor, _ := strconv.Atoi(parts[1])
+	patch, _ := strconv.Atoi(parts[2])
+	return major, minor, patch
 }
 
 func (v *Vehicle) getNextJitterDelay(r *rand.Rand, base time.Duration) time.Duration {

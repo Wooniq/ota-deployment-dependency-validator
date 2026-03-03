@@ -5,6 +5,7 @@ package collector
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 )
 
@@ -21,38 +22,37 @@ type ECUInfo struct {
 type VehicleInventory struct {
 	VIN  string    `json:"vin"`  // 차대번호 (Vehicle Identification Number)
 	ECUs []ECUInfo `json:"ecus"` // 해당 차량에 탑재된 제어기 배열 (슬라이스)
+	SOH  float64   `json:"soh"`  // 배터리 건강 상태 정보 필드
 }
+
+// [Advanced] 업데이트 가능 최소 SOH 상구 설정
+const MinUpdateSOH = 0.7
 
 // 데이터 무결성 검증 메서드
 func (v *VehicleInventory) Validate() error {
 	if v.VIN == "" {
-		return errors.New("차대번호(VIN)가 누락되었습니다")
+		return errors.New("차대번호(VIN) 누락")
 	}
-	if len(v.ECUs) == 0 {
-		return errors.New("장착된 제어기(ECU) 정보가 없습니다")
+	// 수집 단계에서 즉시 업데이트 적격성 1차 판단
+	if v.SOH < MinUpdateSOH {
+		// 전송은 하되, 상태값에 경고를 포함하거나 로깅 처리
+		log.Printf("[Warn] VIN:%s SOH 부족 (%.2f). 업데이트 제한 대상", v.VIN, v.SOH)
 	}
 	return nil
 }
 
-// LoadInventory: 지정된 경로의 JSON 파일을 읽어 데이터 구조체로 변환합니다.
-// 파일 시스템에서 동적으로 정보를 수집하는 핵심 함수입니다.
+// LoadInventory: JSON 파일을 읽어 SOH를 포함한 전체 인벤토리를 로드합니다.
 func LoadInventory(path string) (*VehicleInventory, error) {
-	// 1. 파일 읽기 (바이트 배열로)
-	// 1. 파일 읽기
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. 구조체 변수 먼저 생성
 	var inv VehicleInventory
-
-	// 3. JSON 데이터를 구조체에 채우기
 	if err := json.Unmarshal(data, &inv); err != nil {
 		return nil, err
 	}
 
-	// 4. 다 채워진 데이터 검사하기
 	if err := inv.Validate(); err != nil {
 		return nil, err
 	}

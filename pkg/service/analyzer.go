@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -72,37 +70,40 @@ func (s *OTAAnalyzer) AnalyzeAndSave(vin, payload string) error {
 	return nil
 }
 
-// AnalyzeAndSaveBinary: Autosar DLT 표준(BigEndian)에 따라 바이너리를 해석하고 정규식으로 ECU 정보를 추출함
+// AnalyzeAndSaveBinary: 고도화된 고정폭 바이너리 규격에 맞춰 데이터를 파싱함
 func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) error {
+	// [규격] VIN(17) + SOH(4) + (ECU_ID(4) + Maj(1) + Min(1) + Pat(1)) * N
 	if len(payload) < 21 {
 		return fmt.Errorf("데이터 길이 부족")
 	}
 
-	// SOH 추출: DLT 표준에 따라 마지막 4바이트를 BigEndian IEEE 754 float32로 해석
-	sohOffset := len(payload) - 4
-	sohRaw := binary.BigEndian.Uint32(payload[sohOffset:]) // BigEndian 고정
+	// 1. VIN 추출 (0~17): 공백 제거 후 실제 값 확보
+	vin := strings.TrimSpace(string(payload[0:17]))
+
+	// 2. SOH 추출 (17~21): BigEndian IEEE 754 float32
+	sohRaw := binary.BigEndian.Uint32(payload[17:21])
 	batterySOH := float64(math.Float32frombits(sohRaw))
 
-	// ECU 정보 추출: 정규식을 활용하여 텍스트 내 ECU 명칭 및 버전 식별 (데이터 밀림 방지)
-	rawText := string(payload[:sohOffset])
-	re := regexp.MustCompile(`(BMS|ADAS|ICU|TCU)\s+v?(\d+)\.(\d+)\.(\d+)`)
-	matches := re.FindAllStringSubmatch(rawText, -1)
+	// 3. ECU 정보 반복 추출 (21 index 부터 끝까지)
+	// 한 세트당 7바이트 (ID 4 + Ver 3)
+	for offset := 21; offset+7 <= len(payload); offset += 7 {
+		// ECU ID 추출 (4바이트)
+		ecuID := strings.TrimSpace(string(payload[offset : offset+4]))
+		if ecuID == "" {
+			continue
+		}
 
-	if len(matches) == 0 {
-		return fmt.Errorf("DLT 텍스트 파싱 실패 (Raw: %s)", rawText)
-	}
-
-	for _, match := range matches {
-		ecuID := match[1]
-		major, _ := strconv.Atoi(match[2])
-		minor, _ := strconv.Atoi(match[3])
-		patch, _ := strconv.Atoi(match[4])
+		// 버전 추출 (3바이트 정수 -> 문자열 복원)
+		major := int(payload[offset+4])
+		minor := int(payload[offset+5])
+		patch := int(payload[offset+6])
 		versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
 
+		// 분석 및 엔티티 생성
 		status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
 
 		entity := repository.VehicleInfo{
-			VIN:          vinFromTopic,
+			VIN:          vin, // 혹은 vinFromTopic
 			ECUType:      ecuID,
 			SWMajor:      major,
 			SWMinor:      minor,
@@ -115,6 +116,7 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 		}
 		s.dataChan <- entity
 	}
+
 	return nil
 }
 
