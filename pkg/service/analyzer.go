@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wooniq/ota-agent/pkg/protocol"
 	"github.com/Wooniq/ota-agent/pkg/repository"
 )
 
@@ -70,7 +71,7 @@ func (s *OTAAnalyzer) AnalyzeAndSave(vin, payload string) error {
 	return nil
 }
 
-// AnalyzeAndSaveBinary: 고도화된 고정폭 바이너리 규격에 맞춰 데이터를 파싱함
+/*// AnalyzeAndSaveBinary: 고도화된 고정폭 바이너리 규격에 맞춰 데이터를 파싱함
 func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) error {
 	// [규격] VIN(17) + SOH(4) + (ECU_ID(4) + Maj(1) + Min(1) + Pat(1)) * N
 	if len(payload) < 21 {
@@ -104,6 +105,60 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 
 		entity := repository.VehicleInfo{
 			VIN:          vin, // 혹은 vinFromTopic
+			ECUType:      ecuID,
+			SWMajor:      major,
+			SWMinor:      minor,
+			SWPatch:      patch,
+			HWVersion:    "HW_REV_01",
+			BatterySOH:   batterySOH,
+			UpdateStatus: status,
+			LastReported: time.Now(),
+			NeedsUpdate:  needsUpdate,
+		}
+		s.dataChan <- entity
+	}
+
+	return nil
+}
+*/
+
+func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) error {
+	// 1. DLT 패킷 해석 (16바이트 헤더 제거 및 검증)
+	// protocol 패키지에 이미 구현된 ParseDltPacket을 사용하여 순수 데이터만 추출합니다.
+	pureData, err := protocol.ParseDltPacket(payload)
+	if err != nil {
+		return fmt.Errorf("DLT 해석 실패: %v", err)
+	}
+
+	// 2. 최소 데이터 길이 확인 (VIN 17 + SOH 4 = 21바이트)
+	if len(pureData) < 21 {
+		return fmt.Errorf("순수 데이터 길이 부족")
+	}
+
+	// 3. VIN 추출 (0~17) - pureData 기준
+	vin := strings.TrimSpace(string(pureData[0:17]))
+
+	// 4. SOH 추출 (17~21) - pureData 기준
+	sohRaw := binary.BigEndian.Uint32(pureData[17:21])
+	batterySOH := float64(math.Float32frombits(sohRaw))
+
+	// 5. ECU 정보 반복 추출 (21 index 부터 시작)
+	for offset := 21; offset+7 <= len(pureData); offset += 7 {
+		ecuID := strings.TrimSpace(string(pureData[offset : offset+4]))
+		if ecuID == "" {
+			continue
+		}
+
+		major := int(pureData[offset+4])
+		minor := int(pureData[offset+5])
+		patch := int(pureData[offset+6])
+		versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
+
+		// 분석 및 엔티티 생성
+		status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
+
+		entity := repository.VehicleInfo{
+			VIN:          vin,
 			ECUType:      ecuID,
 			SWMajor:      major,
 			SWMinor:      minor,
