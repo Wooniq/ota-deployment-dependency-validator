@@ -42,11 +42,11 @@ func StartCollector(brokerAddr string, kp *KafkaProducer) { // analyzer 대신 k
 			log.Printf("[MQTT-Bridge] 데이터 수신 성공! VIN: %s, Data: %s", vin, string(rawPayload))
 
 			// 3. [ADR 0001] Kafka Producer를 통해 클러스터 적재
-			// 분석(E1 체크 등)은 여기서 하지 않고, Consumer가 나중에 처리합니다.
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
-			if err := kp.PublishMessage(ctx, vin, dltData); err != nil {
+			//  dltData가 아닌 원본 데이터(rawPayload)를 Kafka에 그대로 적재
+			if err := kp.PublishMessage(ctx, vin, rawPayload); err != nil {
 				log.Printf("[Kafka-Error] VIN:%s 전송 실패: %v", vin, err)
 			}
 		})
