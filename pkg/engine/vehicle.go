@@ -151,12 +151,20 @@ func (v *Vehicle) setupSpecificUpdateSubscriber(vin string) {
 
 // 5. [내부 헬퍼] DLT 바이너리 조립 및 전송 로직
 func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
-	// 1. 고정 크기 버퍼 할당: 런타임 오버헤드 최소화
-	// 구조: VIN(17) + SOH(4) + (ECU_ID(4) + Ver(3)) * N
-	buf := make([]byte, 128)
+	// 1. 필요한 정확한 페이로드 크기 계산
+	// VIN(17) + SOH(4) + (ECU 개수 * 7)
+	// * ECU 세트당 7바이트: ID(4) + Major(1) + Minor(1) + Patch(1)
+	payloadSize := 17 + 4 + (len(inv.ECUs) * 7)
 
-	// 2. VIN 직렬화 (0~16 index): 고정 17바이트
-	copy(buf[0:17], fmt.Sprintf("%-17s", inv.VIN))
+	buf := make([]byte, payloadSize)
+
+	// 2. VIN 직렬화 (0~17 index)
+	// 17자보다 짧으면 공백으로 채우고, 길면 자름 (고정 오프셋 보장)
+	vinBytes := []byte(fmt.Sprintf("%-17s", inv.VIN))
+	if len(vinBytes) > 17 {
+		vinBytes = vinBytes[:17]
+	}
+	copy(buf[0:17], vinBytes) // copy 함수: 가공된 vinBytes를 실제 전송용 버퍼(buf)에 밀어넣음
 
 	// 3. SOH 직렬화 (17~20 index): BigEndian IEEE 754 float32
 	binary.BigEndian.PutUint32(buf[17:21], math.Float32bits(float32(inv.SOH)))
@@ -164,20 +172,20 @@ func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
 	// 4. ECU 데이터 직렬화 (21 index ~)
 	offset := 21
 	for _, ecu := range inv.ECUs {
-		// ECU ID: 4바이트 고정 (예: "BMS ")
-		copy(buf[offset:offset+4], fmt.Sprintf("%-4s", ecu.ID))
+		// ECU ID (4바이트 고정, 예: "BMS ")
+		ecuID := []byte(fmt.Sprintf("%-4s", ecu.ID))
+		if len(ecuID) > 4 {
+			ecuID = ecuID[:4]
+		}
+		copy(buf[offset:offset+4], ecuID)
 
-		// [고도화] 버전 문자열(v2.3.5) -> 3바이트 정수 바이너리 변환
-		// 텍스트 "2.3.5"(5바이트) 대비 약 40% 크기 절감
+		// 버전 정보 (3바이트 고정)
 		major, minor, patch := parseVersionToInt(ecu.SWVersion)
 		buf[offset+4] = byte(major)
 		buf[offset+5] = byte(minor)
 		buf[offset+6] = byte(patch)
 
 		offset += 7
-		if offset+7 > len(buf) {
-			break
-		} // 버퍼 오버플로우 방지
 	}
 
 	// 5. DLT 패킷 생성 및 비동기 전송
@@ -189,8 +197,9 @@ func (v *Vehicle) sendDltInventory(inv *collector.VehicleInventory) {
 		go transport.SendToBroker(v.Client, inv.VIN, sendData)
 	}
 
-	fmt.Printf("[%s] [Optimization-Log] Binary Payload Size: %d bytes (JSON 대비 %d%% 절감)\n",
-		inv.VIN, len(binaryData), 100-(len(binaryData)*100/210))
+	// 최적화 로그: 이제 Binary Payload Size가 ECU 개수에 따라 가변적이지만 정확하게 출력됨
+	fmt.Printf("[%s] [Optimization-Log] Binary Payload Size: %d bytes\n",
+		inv.VIN, len(binaryData))
 }
 
 // [헬퍼] 버전 문자열을 정수형 바이트로 파싱

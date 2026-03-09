@@ -72,98 +72,98 @@ func NewOTAAnalyzer(repo *repository.HANARepository, adasVer, bmsVer string) *OT
 }*/
 
 func (s *OTAAnalyzer) AnalyzeAndSave(vin string, payload string) error {
-    // 1. JSON 구조에 맞는 임시 구조체 정의 (현장 데이터 기반)
-    var data struct {
-        VIN  string  `json:"vin"`
-        SOH  float64 `json:"soh"`
-        ECUs []struct {
-            ID        string `json:"id"`
-            HWVersion string `json:"hw_version"`
-            SWVersion string `json:"sw_version"`
-        } `json:"ecus"`
-    }
+	// 1. JSON 구조에 맞는 임시 구조체 정의 (현장 데이터 기반)
+	var data struct {
+		VIN  string  `json:"vin"`
+		SOH  float64 `json:"soh"`
+		ECUs []struct {
+			ID        string `json:"id"`
+			HWVersion string `json:"hw_version"`
+			SWVersion string `json:"sw_version"`
+		} `json:"ecus"`
+	}
 
-    if err := json.Unmarshal([]byte(payload), &data); err != nil {
-        return fmt.Errorf("JSON 파싱 실패: %w", err)
-    }
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		return fmt.Errorf("JSON 파싱 실패: %w", err)
+	}
 
-    // 2. 파싱된 데이터를 루프 돌며 DB 엔티티로 변환
-    for _, ecu := range data.ECUs {
-        cleanedID := strings.TrimSpace(ecu.ID) // "BMS " -> "BMS" 공백 제거
+	// 2. 파싱된 데이터를 루프 돌며 DB 엔티티로 변환
+	for _, ecu := range data.ECUs {
+		cleanedID := strings.TrimSpace(ecu.ID) // "BMS " -> "BMS" 공백 제거
 
-        // 버전 분리 (v2.3.7 -> 2, 3, 7)
-        major, minor, patch := parseVersionParts(ecu.SWVersion)
+		// 버전 분리 (v2.3.7 -> 2, 3, 7)
+		major, minor, patch := parseVersionParts(ecu.SWVersion)
 
-        // 분석 로직 수행
-        status, needsUpdate := s.performDeepAnalysis(ecu.SWVersion, ecu.SWVersion, data.SOH)
+		// 분석 로직 수행
+		status, needsUpdate := s.performDeepAnalysis(ecu.SWVersion, ecu.SWVersion, data.SOH)
 
-        entity := repository.VehicleInfo{
-            VIN:          data.VIN,
-            ECUType:      cleanedID,
-            SWMajor:      major,
-            SWMinor:      minor,
-            SWPatch:      patch,
-            HWVersion:    ecu.HWVersion,
-            BatterySOH:   data.SOH,
-            UpdateStatus: status,
-            LastReported: time.Now(),
-            NeedsUpdate:  needsUpdate,
-        }
+		entity := repository.VehicleInfo{
+			VIN:          data.VIN,
+			ECUType:      cleanedID,
+			SWMajor:      major,
+			SWMinor:      minor,
+			SWPatch:      patch,
+			HWVersion:    ecu.HWVersion,
+			BatterySOH:   data.SOH,
+			UpdateStatus: status,
+			LastReported: time.Now(),
+			NeedsUpdate:  needsUpdate,
+		}
 
-        // 채널에 담아 Bulk Insert 워커로 전달
-        s.dataChan <- entity
-    }
-    return nil
+		// 채널에 담아 Bulk Insert 워커로 전달
+		s.dataChan <- entity
+	}
+	return nil
 }
 
 // AnalyzeAndSaveBinary: 실무 규격(바이너리 오프셋) 기반 고속 파싱 및 분석
 func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) error {
-	// 1. [표준 준수] DLT 패킷 해석 및 순수 페이로드 분리
+	// 1. [표준 준수] DLT 패킷 해석 및 순수 페이로드 분리 (헤더 16바이트 제거)
 	pureData, err := protocol.ParseDltPacket(payload)
 	if err != nil {
 		return fmt.Errorf("DLT 패킷 해석 실패: %v", err)
 	}
 
-	// [규격 검증] 최소 길이 확인 (VIN 17바이트 + SOH 4바이트 = 최소 21바이트)
+	// 2. [규격 검증] 최소 길이 확인 (VIN 17바이트 + SOH 4바이트 = 최소 21바이트)
 	dataLen := len(pureData)
 	if dataLen < 21 {
 		return fmt.Errorf("부적절한 패킷 길이: %d (최소 21 필요)", dataLen)
 	}
 
-	// 2. [신뢰성] VIN 추출 및 유효성 검증
-	// 현업 규격: 고정 오프셋(0~17)에서 추출하여 문자열 캐스팅 최소화
+	// 3. VIN 추출 (0~17 오프셋)
+	// 에이전트에서 "%-17s"로 넣은 공백을 TrimSpace로 깔끔하게 제거합니다.
 	vin := strings.TrimSpace(string(pureData[0:17]))
 	if !strings.HasPrefix(vin, "WNK") {
 		log.Printf("[Security-Alert] 비정상 VIN 패턴 감지: %s, 토픽 정보(%s)로 보정", vin, vinFromTopic)
-		vin = vinFromTopic // 보안 및 정합성을 위한 토픽 정보 신뢰 정책 [3]
+		vin = vinFromTopic
 	}
 
-	// 3. [안전 점검] 배터리 SOH 추출 (BigEndian IEEE 754 float32)
-	// 업데이트 중 전력 차단(Bricking) 방지를 위한 핵심 지표 [2, 4]
+	// 4. 배터리 SOH 추출 (17~21 오프셋)
 	sohRaw := binary.BigEndian.Uint32(pureData[17:21])
 	batterySOH := float64(math.Float32frombits(sohRaw))
 
-	// 4. [효율성] 가변 ECU 데이터 루프 처리 (오프셋 기반 고속 스캔)
-	// 규격: ECU_ID(4) + Major(1) + Minor(1) + Patch(1) = 세트당 7바이트
+	// 5. ECU 데이터 루프 처리 (21 오프셋부터 7바이트씩)
 	foundAny := false
 	for offset := 21; offset+7 <= dataLen; offset += 7 {
-		// ECU ID 추출
+		// ECU ID 추출 (4바이트)
 		id := strings.TrimSpace(string(pureData[offset : offset+4]))
 		if id == "" {
 			continue
 		}
 
 		foundAny = true
-		// 버전 정보 추출 (바이너리 정수 -> 문자열 복원하여 전송 효율 극대화) [2]
+		// 버전 정보 추출 (3바이트: Major, Minor, Patch)
 		major := int(pureData[offset+4])
 		minor := int(pureData[offset+5])
 		patch := int(pureData[offset+6])
+
+		// 1. 추출한 숫자를 다시 "2.3.5" 형태의 문자열로 복원
 		versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
 
-		// 5. [분석 엔진] 목표 버전 대비 업데이트 필요 여부 판별 (SAP HANA 연동 준비) [5]
-		status, needsUpdate := s.performDeepAnalysis(id, versionStr, batterySOH)
+		// 2. 분석 엔진 호출
+		status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
 
-		// 6. [비동기 처리] 파이프라인 전송 (Mass Request 대응을 위한 채널 활용) [6, 7]
+		// 6. [비동기 처리] 파이프라인 전송 (Mass Request 대응을 위한 채널 활용)
 		s.dataChan <- repository.VehicleInfo{
 			VIN:          vin,
 			ECUType:      id,

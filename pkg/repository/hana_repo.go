@@ -42,17 +42,17 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 
 	// 스키마(Level 1) 규격에 맞춘 UPSERT 쿼리
 	query := `UPSERT "Vehicle_ECU_Inventory" (
-		"VIN",
-		"ECUType",
-		"HWVersion",
-		"SWMajor",
-		"SWMinor",
-		"SWPatch",
-		"BatterySOH",
-		"LastReported",
-		"UpdateStatus",
-		"RegionCode",
-		"NeedsUpdate"
+		"VEHICLE_ID", 
+		"ECU_TYPE", 
+		"HW_VERSION", 
+		"SW_MAJOR_V", 
+		"SW_MINOR_V", 
+		"SW_PATCH_V", 
+		"BATTERY_SOH", 
+		"LAST_REPORTED_AT", 
+		"UPDATE_STATUS", 
+		"REGION_CODE", 
+		"NEEDS_UPDATE"
 	) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?) WITH PRIMARY KEY`
 
 	stmt, err := tx.Prepare(query)
@@ -65,6 +65,7 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 		// VIN 문자열에서 마지막 숫자 그룹을 추출하여 BIGINT 타입의 VEHICLE_ID 생성
 		vehicleID := extractIDFromVIN(v.VIN)
 
+		// 2. Exec 인자 전달
 		_, err := stmt.Exec(
 			vehicleID,    // 1. VEHICLE_ID (BIGINT)
 			v.ECUType,    // 2. ECU_TYPE
@@ -73,7 +74,10 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 			v.SWMinor,    // 5. SW_MINOR_V
 			v.SWPatch,    // 6. SW_PATCH_V
 			v.BatterySOH, // 7. BATTERY_SOH
-			12.6,         // 8. BATTERY_VOLTAGE (Safety check 기준 전압)
+			// CURRENT_TIMESTAMP 자리 (인자 전달 필요 없음)
+			string(v.UpdateStatus), // 8. UPDATE_STATUS
+			v.RegionCode,           // 9. REGION_CODE
+			v.NeedsUpdate,          // 10. NEEDS_UPDATE
 		)
 		if err != nil {
 			return fmt.Errorf("Exec 실패 (ID: %d): %w", vehicleID, err)
