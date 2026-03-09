@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wooniq/ota-agent/pkg/protocol"
 	"github.com/Wooniq/ota-agent/pkg/repository"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 // OTAAnalyzer: 차량 데이터 분석 및 SAP HANA DB 적재를 담당하는 서비스 객체
@@ -20,16 +21,18 @@ type OTAAnalyzer struct {
 	TargetBMS  string
 	dataChan   chan repository.VehicleInfo // 비동기 DB 적재를 위한 데이터 채널
 	batchSize  int                         // 벌크 Insert 단위
+	MQTTClient mqtt.Client                 // 롤백 명령을 보내기 위한 MQTT 클라이언트
 }
 
 // NewOTAAnalyzer: 분석기 인스턴스를 생성하고 백그라운드 배치 워커를 가동함
-func NewOTAAnalyzer(repo *repository.HANARepository, adasVer, bmsVer string) *OTAAnalyzer {
+func NewOTAAnalyzer(repo *repository.HANARepository, mqttClient mqtt.Client, adasVer, bmsVer string) *OTAAnalyzer {
 	a := &OTAAnalyzer{
 		Repo:       repo,
 		TargetADAS: adasVer,
 		TargetBMS:  bmsVer,
 		dataChan:   make(chan repository.VehicleInfo, 2000),
 		batchSize:  100,
+		MQTTClient: mqttClient, // 주입받은 MQTT 클라이언트 저장
 	}
 	go a.startHanaBatchWorker()
 	return a
@@ -53,7 +56,7 @@ func (s *OTAAnalyzer) AnalyzeAndSave(vin string, payload string) error {
 
 	// 2. 파싱된 데이터를 루프 돌며 DB 엔티티로 변환
 	for _, ecu := range data.ECUs {
-		cleanedID := strings.TrimSpace(ecu.ID) // "BMS " -> "BMS" 공백 제거
+		cleanedID := strings.TrimSpace(ecu.ID)
 
 		// 버전 분리 (v2.3.7 -> 2, 3, 7)
 		major, minor, patch := parseVersionParts(ecu.SWVersion)
@@ -88,11 +91,8 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 
 	var targetData []byte
 	if vinStartIndex != -1 {
-		// 앞에 "5?ICU INV " 같은 쓰레기 값이 몇 바이트든 상관없이,
-		// VIN이 시작하는 지점부터 끝까지 깔끔하게 잘라냅니다.
 		targetData = payload[vinStartIndex:]
 	} else {
-		// [안전망] 만약 원본에도 없다면 DLT 파싱을 시도해봄
 		pureData, err := protocol.ParseDltPacket(payload)
 		if err != nil {
 			return fmt.Errorf("DLT 패킷 파싱 실패")
@@ -124,7 +124,6 @@ func (s *OTAAnalyzer) parseBody(vin string, data []byte) error {
 	for offset := 21; offset+7 <= len(data); offset += 7 {
 		id := strings.TrimSpace(string(data[offset : offset+4]))
 
-		// 하드코딩(ecuNames) 제거! 영문 알파벳 대문자로 시작하는지만 검사하여 범용성 확보
 		if id == "" || id[0] < 'A' || id[0] > 'Z' {
 			continue
 		}
@@ -213,4 +212,63 @@ func parseVersionParts(v string) (int, int, int) {
 		fmt.Sscanf(p[i], "%d", &res[i])
 	}
 	return res[0], res[1], res[2]
+}
+
+// TriggerRollback: 에러 발생 차량에게 이전 안정 버전으로 복구하라는 명령 하달
+// 대규모 Mass Request 상황에서 Kafka Consumer 병목을 막기 위해 고루틴(비동기)으로 실행
+func (s *OTAAnalyzer) TriggerRollback(vin string, targetECU string) {
+	if s.MQTTClient == nil {
+		log.Printf("[Rollback-Error] MQTT Client가 초기화되지 않아 명령을 보낼 수 없습니다.")
+		return
+	}
+
+	// 비동기 스레드 분리
+	go func(v, ecu string) {
+		log.Printf("[Rollback-Init] VIN: %s의 %s 제어기 복구 절차 시작", v, ecu)
+
+		// HANA DB에서 '직전 성공 버전(Last Known Good Configuration)' 동적 조회
+		stableVer, stablePath, stableHash, err := s.Repo.GetLastStableFirmware(v, ecu)
+		if err != nil {
+			log.Printf("[Rollback-Warning] VIN: %s (%s)의 이전 정상 버전을 찾을 수 없습니다. 공장 초기화 버전으로 대체합니다. (사유: %v)", v, ecu, err)
+			// DB 조회 실패 시 최후의 보루(Fallback) 설정
+			stableVer = "v1.0.0"
+			stablePath = fmt.Sprintf("/firmware/%s/factory_default.bin", ecu)
+			stableHash = "FACTORY_DEFAULT_SAFE_HASH"
+		}
+
+		// 2. 에이전트 규격에 맞는 페이로드 조립
+		cmdPayload := map[string]string{
+			"action":        "rollback",
+			"file_path":     stablePath,
+			"expected_hash": stableHash,
+			"version":       stableVer,
+		}
+
+		data, err := json.Marshal(cmdPayload)
+		if err != nil {
+			log.Printf("[Rollback-Error] 페이로드 조립 실패: %v", err)
+			return
+		}
+
+		// 3. 해당 차량의 Command 토픽으로 Publish
+		topic := fmt.Sprintf("ota/command/%s", v)
+		token := s.MQTTClient.Publish(topic, 1, false, data)
+		token.Wait() // 고루틴 내부이므로 Wait() 해도 메인 Kafka 루프에 영향 없음
+
+		if token.Error() != nil {
+			log.Printf("[Rollback-Fatal] VIN: %s 롤백 명령 발송 실패! (%v)", v, token.Error())
+
+			// 실패 이력도 DB에 남김
+			s.Repo.RecordUpdateHistory(v, ecu, "ERR_ROLLBACK_PUBLISH_FAILED", stableVer)
+		} else {
+			log.Printf("[Anti-Bricking] VIN: %s (%s) 해시 불일치 감지! 이전 정상 버전(%s) 복구 명령 발송 완료!", v, ecu, stableVer)
+
+			// [제언 2 반영] 상태 추적 및 이력 관리 (Audit Trail)
+			// 나중에 관제 대시보드에서 '롤백 조치된 차량 목록'을 띄우기 위한 기록
+			err = s.Repo.RecordUpdateHistory(v, ecu, "ERR_ROLLBACK_INITIATED", stableVer)
+			if err != nil {
+				log.Printf("[Audit-Warning] VIN: %s 롤백 이력 DB 기록 실패: %v", v, err)
+			}
+		}
+	}(vin, targetECU) // 클로저 변수 캡처 문제 방지를 위해 파라미터로 넘김
 }

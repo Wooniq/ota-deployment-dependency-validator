@@ -97,6 +97,43 @@ func extractIDFromVIN(vin string) int64 {
 	return 0
 }
 
+// 특정 차량/ECU의 가장 최근 성공(StatusSuccess) 버전 조회 (현재는 Mock 연동)
+func (r *HANARepository) GetLastStableFirmware(vin string, ecuType string) (version string, path string, hash string, err error) {
+	/* 나중에 실제 DB 연동할 때 주석 해제
+	query := `
+		SELECT "SWVersion", "FilePath", "ExpectedHash"
+		FROM "Update_History"
+		WHERE "VIN" = ? AND "ECUType" = ? AND "Status" = 'StatusSuccess'
+		ORDER BY "Timestamp" DESC
+		LIMIT 1
+	`
+	row := r.db.QueryRow(query, vin, ecuType)
+	err = row.Scan(&version, &path, &hash)
+	*/
+
+	// db.QueryRow 등을 이용한 실제 DB 연동 로직
+	// row := r.db.QueryRow(query, vin, ecuType)
+	// err = row.Scan(&version, &path, &hash)
+
+	// TODO: DB 연동 전 임시 모의(Mock) 데이터 반환
+	return "v2.1.0", "/firmware/" + ecuType + "/v2.1.0.bin", "a1b2c3d4e5f6dummyhash", nil
+}
+
+// 차량의 롤백 및 업데이트 이력 저장 (대시보드 트래킹 용도)
+func (r *HANARepository) RecordUpdateHistory(vin string, ecuType string, status string, targetVersion string) error {
+	/* 나중에 실제 DB 연동할 때 주석 해제
+	query := `
+		INSERT INTO "Update_History" ("VIN", "ECUType", "Status", "TargetVersion", "Timestamp")
+		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+	`
+	_, err := r.db.Exec(query, vin, ecuType, status, targetVersion)
+	return err
+	*/
+
+	// TODO: DB 연동 전 임시 성공 반환
+	return nil
+}
+
 // Close: DB 연결 종료
 func (r *HANARepository) Close() error {
 	if r.db != nil {
