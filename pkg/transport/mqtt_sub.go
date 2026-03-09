@@ -32,9 +32,8 @@ func StartCollector(brokerAddr string, kp *KafkaProducer) { // analyzer 대신 k
 			vin := topicParts[2]
 
 			// 2. [표준 규격] DLT 패킷 디코딩
-			// 수집 단계에서 최소한의 규격 검증만 수행합니다.
 			rawPayload := msg.Payload()
-			dltData, err := protocol.ParseDltPacket(rawPayload)
+			_, err := protocol.ParseDltPacket(rawPayload)
 			if err != nil {
 				log.Printf("[Protocol-Error] VIN:%s 비표준 패킷 무시: %v", vin, err)
 				return
