@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"syscall"
-	"fmt"
 	"strings"
+	"syscall"
 
 	"github.com/Wooniq/ota-agent/pkg/repository"
 	"github.com/Wooniq/ota-agent/pkg/service"
@@ -30,10 +30,10 @@ func main() {
 		os.Getenv("HANA_USER"),
 		os.Getenv("HANA_PASSWORD"),
 	)
-	
+
 	fmt.Println("DEBUG: HANA_ADDRESS =", os.Getenv("HANA_ADDRESS"))
 	fmt.Println("DEBUG: HANA_PORT =", os.Getenv("HANA_PORT"))
-	
+
 	if err != nil {
 		log.Fatalf("관제 시스템 구동 실패: %v", err)
 	}
@@ -52,10 +52,21 @@ func main() {
 	defer kafkaProducer.Close()
 	log.Println("[Step 2] Kafka Producer (3-Node) 준비 완료")
 
-	// 4. [Service] 분석 엔진 초기화
-	// 타겟 버전 설정을 통해 업데이트 대상 차량을 분류합니다.
-	analyzer := service.NewOTAAnalyzer(repo, "v2.2.2", "v1.3.9")
-	log.Println("[Step 3] OTA 분석 엔진 준비 완료")
+	// 4. [Service] 서버 전용 MQTT 클라이언트 생성 및 분석 엔진 초기화
+	mqttBroker := os.Getenv("MQTT_BROKER")
+	if mqttBroker == "" {
+		mqttBroker = "tcp://mqtt-broker:1883"
+	}
+
+	// 4-1. 서버가 명령(롤백)을 내리기 위한 MQTT 클라이언트 생성
+	serverMqttClient, err := transport.NewMQTTClient(mqttBroker, "OTA-Server-Commander")
+	if err != nil {
+		log.Fatalf("서버 MQTT 클라이언트 초기화 실패: %v", err)
+	}
+
+	// 4-2. 파라미터 4개(repo, serverMqttClient, adasVer, bmsVer)를 정확히 전달!
+	analyzer := service.NewOTAAnalyzer(repo, serverMqttClient, "v2.2.2", "v1.3.9")
+	log.Println("[Step 3] OTA 분석 엔진 (Command 발송 포함) 준비 완료")
 
 	// 5. [Transport] Kafka Consumer 기동(분석용)
 	kafkaConsumer := transport.NewKafkaConsumer(brokers, "ota-inventory", "analyzer-group-v1")
@@ -63,11 +74,7 @@ func main() {
 	log.Println("[Step 4] Kafka Consumer (분석 계층) 가동 중")
 
 	// 6. [Transport] MQTT 수집기 가동 (입력용)
-	mqttBroker := os.Getenv("MQTT_BROKER")
-	if mqttBroker == "" {
-		mqttBroker = "tcp://mqtt-broker:1883"
-	}
-	go transport.StartCollector(mqttBroker, kafkaProducer) // analyzer 대신 kafkaProducer 전달
+	go transport.StartCollector(mqttBroker, kafkaProducer)
 	log.Println("[Step 5] MQTT 수집기 가동 중 (입력 -> Kafka)")
 
 	// 7. Graceful Shutdown
