@@ -34,6 +34,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:9092,EXTERNAL://localhost:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      # JVM 힙 메모리를 256MB로 제한
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
 
   kafka-2:
     image: confluentinc/cp-kafka:7.5.0
@@ -47,6 +49,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:9092,EXTERNAL://localhost:29093
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      # JVM 힙 메모리를 256MB로 제한
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
 
   kafka-3:
     image: confluentinc/cp-kafka:7.5.0
@@ -60,3 +64,37 @@ services:
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:9092,EXTERNAL://localhost:29094
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      # JVM 힙 메모리를 256MB로 제한
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
+  # 4. OTA Agent (가상 차량 1,000대 시뮬레이터)
+  ota-agent:
+    build:
+      context: .
+      dockerfile: cmd/agent/Dockerfile
+    container_name: ota-agent
+    depends_on:
+      - mqtt-broker
+    environment:
+      - BROKER_URL=tcp://mqtt-broker:1883
+    volumes:
+    # 호스트의 data 폴더를 컨테이너의 /root/data 폴더로 연결
+    # (실행 스테이지의 WORKDIR가 /root/ 이므로 상대 경로를 맞춤)
+     - ./data:/root/data
+    restart: always
+
+  # 5. OTA Server (관제 서버)
+  ota-server:
+    build:
+      context: .
+      dockerfile: cmd/server/Dockerfile
+    container_name: ota-server
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+      - mqtt-broker
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    restart: always
