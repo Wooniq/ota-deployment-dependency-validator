@@ -135,6 +135,11 @@ func (s *OTAAnalyzer) parseBody(vin string, data []byte) error {
 
 		versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
 		status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
+		
+		// [Trigger] SOH 부족(StatusBatteryLow) 감지 시 즉시 롤백 명령
+		if batterySOH < 0.99 {
+			s.TriggerRollback(vin, id)
+		}
 
 		s.dataChan <- repository.VehicleInfo{
 			VIN:          vin,

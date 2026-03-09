@@ -38,7 +38,7 @@ func StartCollector(brokerAddr string, kp *KafkaProducer) { // analyzer 대신 k
 				log.Printf("[Protocol-Error] VIN:%s 비표준 패킷 무시: %v", vin, err)
 				return
 			}
-			log.Printf("[MQTT-Bridge] 데이터 수신 성공! VIN: %s, Data: %s", vin, string(rawPayload))
+			//log.Printf("[MQTT-Bridge] 데이터 수신 성공! VIN: %s, Data: %s", vin, string(rawPayload))
 
 			// 3. [ADR 0001] Kafka Producer를 통해 클러스터 적재
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
