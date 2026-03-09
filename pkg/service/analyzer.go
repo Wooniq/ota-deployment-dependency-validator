@@ -35,42 +35,6 @@ func NewOTAAnalyzer(repo *repository.HANARepository, adasVer, bmsVer string) *OT
 	return a
 }
 
-// AnalyzeAndSave: JSON 형식의 데이터를 파싱하여 ECU별로 정규화 후 채널에 전달함
-/*func (s *OTAAnalyzer) AnalyzeAndSave(vin, payload string) error {
-	var dto repository.VehicleInventoryDTO
-	if err := json.Unmarshal([]byte(payload), &dto); err != nil {
-		return fmt.Errorf("JSON 파싱 실패 (VIN: %s): %w", vin, err)
-	}
-
-	ecuTargets := []struct {
-		ID  string
-		Ver string
-	}{
-		{"ADAS", dto.ADAS},
-		{"BMS", dto.BMS},
-	}
-
-	for _, ecu := range ecuTargets {
-		status, needsUpdate := s.performDeepAnalysis(ecu.Ver, ecu.Ver, dto.SOH)
-		major, minor, patch := parseVersionParts(ecu.Ver)
-
-		entity := repository.VehicleInfo{
-			VIN:          vin,
-			ECUType:      ecu.ID,
-			SWMajor:      major,
-			SWMinor:      minor,
-			SWPatch:      patch,
-			HWVersion:    dto.HW,
-			BatterySOH:   dto.SOH,
-			UpdateStatus: status,
-			LastReported: time.Now(),
-			NeedsUpdate:  needsUpdate,
-		}
-		s.dataChan <- entity
-	}
-	return nil
-}*/
-
 func (s *OTAAnalyzer) AnalyzeAndSave(vin string, payload string) error {
 	// 1. JSON 구조에 맞는 임시 구조체 정의 (현장 데이터 기반)
 	var data struct {
@@ -124,53 +88,62 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 		return fmt.Errorf("DLT 패킷 해석 실패: %v", err)
 	}
 
-	// 2. [규격 검증] 최소 길이 확인 (VIN 17바이트 + SOH 4바이트 = 최소 21바이트)
-	dataLen := len(pureData)
-	if dataLen < 21 {
-		return fmt.Errorf("부적절한 패킷 길이: %d (최소 21 필요)", dataLen)
+	// 2. [범용 로직] 앞에서부터 훑으며 VIN(17자리)의 시작점을 찾음
+	// WNK가 아니더라도 영문 대문자+숫자 조합의 17자리를 찾는 정규식 등을 쓸 수 있지만,
+	// 가장 확실한 건 에이전트가 '데이터만' 보내게 만드는 것입니다.
+
+	// 우선 현재 로그처럼 앞에 쓰레기 값이 붙어온다면,
+	// 실제 VIN(vinFromTopic)이 바이너리 내 어디에 있는지 위치를 찾습니다.
+	vinStartIndex := strings.Index(string(pureData), vinFromTopic)
+	if vinStartIndex == -1 {
+		// 만약 바이너리 안에 VIN이 없다면? 토픽 VIN을 쓰고 바이너리는 통째로 데이터로 간주
+		log.Printf("[Info] 패킷 내 VIN 미포함. 토픽 VIN(%s) 사용", vinFromTopic)
+		return s.parseBody(vinFromTopic, pureData)
 	}
 
-	// 3. VIN 추출 (0~17 오프셋)
-	// 에이전트에서 "%-17s"로 넣은 공백을 TrimSpace로 깔끔하게 제거합니다.
-	vin := strings.TrimSpace(string(pureData[0:17]))
-	if !strings.HasPrefix(vin, "WNK") {
-		log.Printf("[Security-Alert] 비정상 VIN 패턴 감지: %s, 토픽 정보(%s)로 보정", vin, vinFromTopic)
-		vin = vinFromTopic
+	// 3. VIN 위치를 찾았다면 그 이후부터 정해진 규격대로 파싱
+	bodyData := pureData[vinStartIndex:]
+	return s.parseBody(vinFromTopic, bodyData)
+}
+
+// parseBody: VIN(17) + SOH(4) + ECUs(7*N) 구조를 실제 파싱
+func (s *OTAAnalyzer) parseBody(vin string, data []byte) error {
+	// 최소 길이 검증: VIN(17) + SOH(4) = 21바이트
+	if len(data) < 21 {
+		return fmt.Errorf("데이터 길이 부족 (최소 21바이트 필요, 현재 %d)", len(data))
 	}
 
-	// 4. 배터리 SOH 추출 (17~21 오프셋)
-	sohRaw := binary.BigEndian.Uint32(pureData[17:21])
+	// 1. 배터리 SOH 추출 (VIN 17바이트 직후 4바이트)
+	// IEEE 754 float32 값을 읽어옵니다.
+	sohRaw := binary.BigEndian.Uint32(data[17:21])
 	batterySOH := float64(math.Float32frombits(sohRaw))
 
-	// 5. ECU 데이터 루프 처리 (21 오프셋부터 7바이트씩)
+	// 2. ECU 데이터 루프 처리 (21번 오프셋부터 7바이트씩 절단)
 	foundAny := false
-	for offset := 21; offset+7 <= dataLen; offset += 7 {
-		// ECU ID 추출 (4바이트)
-		id := strings.TrimSpace(string(pureData[offset : offset+4]))
-		if id == "" {
-			continue
+	for offset := 21; offset+7 <= len(data); offset += 7 {
+		// ECU ID (4바이트, 예: "ADAS", "BMS ")
+		id := strings.TrimSpace(string(data[offset : offset+4]))
+		if id == "" || id[0] < 'A' || id[0] > 'Z' {
+			continue // 유효하지 않은 ECU ID 건너뛰기
 		}
 
 		foundAny = true
-		// 버전 정보 추출 (3바이트: Major, Minor, Patch)
-		major := int(pureData[offset+4])
-		minor := int(pureData[offset+5])
-		patch := int(pureData[offset+6])
+		// 버전 정보 (3바이트: Major, Minor, Patch)
+		major := int(data[offset+4])
+		minor := int(data[offset+5])
+		patch := int(data[offset+6])
 
-		// 1. 추출한 숫자를 다시 "2.3.5" 형태의 문자열로 복원
 		versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
-
-		// 2. 분석 엔진 호출
 		status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
 
-		// 6. [비동기 처리] 파이프라인 전송 (Mass Request 대응을 위한 채널 활용)
+		// 3. DB 적재 채널로 전송
 		s.dataChan <- repository.VehicleInfo{
 			VIN:          vin,
 			ECUType:      id,
 			SWMajor:      major,
 			SWMinor:      minor,
 			SWPatch:      patch,
-			HWVersion:    "HW_REV_01", // 실무에선 이 또한 바이너리에서 추출
+			HWVersion:    "HW_REV_01",
 			BatterySOH:   batterySOH,
 			UpdateStatus: status,
 			LastReported: time.Now(),
@@ -179,74 +152,14 @@ func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) 
 	}
 
 	if !foundAny {
-		log.Printf("[Warning] VIN %s: 유효한 ECU 인벤토리 정보 없음", vin)
+		log.Printf("[Warning] VIN %s: 유효한 ECU 정보를 찾지 못했습니다.", vin)
+	} else {
+		// 디버깅용: 적재 시도 로그 (실제 운영 시에는 제거하거나 레벨 조정)
+		// log.Printf("[Success] VIN %s 데이터 분석 완료 및 채널 전송", vin)
 	}
 
 	return nil
 }
-
-/*func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) error {
-    // 1. DLT 패킷 해석
-    pureData, err := protocol.ParseDltPacket(payload)
-    if err != nil {
-       return fmt.Errorf("DLT 해석 실패: %v", err)
-    }
-
-    // [현업 규격] 최소 VIN(17)은 반드시 있어야 함
-    dataLen := len(pureData)
-    if dataLen < 17 {
-       return fmt.Errorf("부정확한 패킷 길이: %d (최소 17 필요)", dataLen)
-    }
-
-    // 2. VIN 추출 및 유효성 검사
-    vin := strings.TrimSpace(string(pureData[0:17]))
-    if len(vin) < 10 { // 기본적인 VIN 형식 검증
-        return fmt.Errorf("유효하지 않은 VIN: %s", vin)
-    }
-
-    // 3. SOH 추출 (데이터가 충분할 때만)
-    var batterySOH float64 = 0.0
-    if dataLen >= 21 {
-       sohRaw := binary.BigEndian.Uint32(pureData[17:21])
-       batterySOH = float64(math.Float32frombits(sohRaw))
-    }
-
-    // 4. 가변 ECU 데이터 루프 처리
-    // 시작 오프셋: 21 (VIN 17 + SOH 4)
-    // 한 세트: 7바이트 (ID 4 + Ver 3)
-    foundECU := false
-    for offset := 21; offset+7 <= dataLen; offset += 7 {
-       ecuID := strings.TrimSpace(string(pureData[offset : offset+4]))
-       if ecuID == "" { continue }
-
-       foundECU = true
-       major, minor, patch := int(pureData[offset+4]), int(pureData[offset+5]), int(pureData[offset+6])
-       versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
-
-       status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
-
-       // 5. DB 엔티티 생성 및 채널 전송
-       s.dataChan <- repository.VehicleInfo{
-          VIN:          vin,
-          ECUType:      ecuID,
-          SWMajor:      major,
-          SWMinor:      minor,
-          SWPatch:      patch,
-          HWVersion:    "HW_REV_01", // 실제 현업에선 이 또한 패킷에서 추출함
-          BatterySOH:   batterySOH,
-          UpdateStatus: status,
-          LastReported: time.Now(),
-          NeedsUpdate:  needsUpdate,
-       }
-    }
-
-    // ECU 정보가 없는 패킷일 경우 VIN과 SOH라도 기본 적재 (옵션)
-    if !foundECU {
-        log.Printf("[Info] VIN %s: ECU 정보 없음, 기본 상태만 기록", vin)
-    }
-
-    return nil
-}*/
 
 // startHanaBatchWorker: 채널 데이터를 모아 주기적으로 SAP HANA DB에 벌크 적재함
 func (a *OTAAnalyzer) startHanaBatchWorker() {
