@@ -134,14 +134,16 @@ func (s *OTAAnalyzer) parseBody(vin string, data []byte) error {
 		patch := int(data[offset+6])
 
 		versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
+		// 1. 상태 분석 (여기서 status가 결정됨)
 		status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
-		
-		// [Trigger] SOH 부족(StatusBatteryLow) 감지 시 즉시 롤백 명령
-		if batterySOH < 0.95 {
-			// 비동기 고루틴으로 안전하게 롤백 프로세스 시작
+
+		// 2. [Trigger] 상태 기반 롤백 명령
+		// performDeepAnalysis에서 결정된 status가 'StatusBatteryLow'라면 롤백
+		if status == repository.StatusBatteryLow {
 			s.TriggerRollback(vin, id)
 		}
 
+		// 3. DB 적재용 채널 전송
 		s.dataChan <- repository.VehicleInfo{
 			VIN:          vin,
 			ECUType:      id,
