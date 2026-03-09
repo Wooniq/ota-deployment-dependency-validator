@@ -40,18 +40,18 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 	}
 	defer tx.Rollback()
 
-	// 스키마(Level 1) 규격에 맞춘 UPSERT 쿼리
+	// 실제 DB 스키마에 맞춘 UPSERT 쿼리
 	query := `UPSERT "Vehicle_ECU_Inventory" (
-		"VEHICLE_ID", 
-		"ECU_TYPE", 
-		"HW_VERSION", 
-		"SW_MAJOR_V", 
-		"SW_MINOR_V", 
-		"SW_PATCH_V", 
-		"BATTERY_SOH", 
-		"LAST_REPORTED_AT", 
-		"UPDATE_STATUS", 
-		"REGION_CODE", 
+		"VIN",
+		"ECUType",
+		"HWVersion",
+		"SWMajor",
+		"SWMinor",
+		"SWPatch",
+		"BatterySOH",
+		"LastReported",
+		"UPDATE_STATUS",
+		"REGION_CODE",
 		"NEEDS_UPDATE"
 	) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?) WITH PRIMARY KEY`
 
@@ -62,25 +62,21 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 	defer stmt.Close()
 
 	for _, v := range batch {
-		// VIN 문자열에서 마지막 숫자 그룹을 추출하여 BIGINT 타입의 VEHICLE_ID 생성
-		vehicleID := extractIDFromVIN(v.VIN)
-
-		// 2. Exec 인자 전달
+		// 2. vehicleID 변환 로직 제거하고, v.VIN을 문자열 그대로 1번 인자로 전달
 		_, err := stmt.Exec(
-			vehicleID,    // 1. VEHICLE_ID (BIGINT)
-			v.ECUType,    // 2. ECU_TYPE
-			v.HWVersion,  // 3. HW_VERSION
-			v.SWMajor,    // 4. SW_MAJOR_V
-			v.SWMinor,    // 5. SW_MINOR_V
-			v.SWPatch,    // 6. SW_PATCH_V
-			v.BatterySOH, // 7. BATTERY_SOH
-			// CURRENT_TIMESTAMP 자리 (인자 전달 필요 없음)
-			string(v.UpdateStatus), // 8. UPDATE_STATUS
-			v.RegionCode,           // 9. REGION_CODE
-			v.NeedsUpdate,          // 10. NEEDS_UPDATE
+			v.VIN,                  // 1. "VIN" (문자열 그대로 전달)
+			v.ECUType,              // 2. "ECUType"
+			v.HWVersion,            // 3. "HWVersion"
+			v.SWMajor,              // 4. "SWMajor"
+			v.SWMinor,              // 5. "SWMinor"
+			v.SWPatch,              // 6. "SWPatch"
+			v.BatterySOH,           // 7. "BatterySOH"
+			string(v.UpdateStatus), // 8. "UPDATE_STATUS"
+			v.RegionCode,           // 9. "REGION_CODE"
+			v.NeedsUpdate,          // 10. "NEEDS_UPDATE"
 		)
 		if err != nil {
-			return fmt.Errorf("Exec 실패 (ID: %d): %w", vehicleID, err)
+			return fmt.Errorf("Exec 실패 (VIN: %s): %w", v.VIN, err)
 		}
 	}
 
