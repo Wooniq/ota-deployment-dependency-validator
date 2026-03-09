@@ -83,27 +83,25 @@ func (s *OTAAnalyzer) AnalyzeAndSave(vin string, payload string) error {
 // AnalyzeAndSaveBinary: 실무 규격(바이너리 오프셋) 기반 고속 파싱 및 분석
 func (s *OTAAnalyzer) AnalyzeAndSaveBinary(vinFromTopic string, payload []byte) error {
 	// 1. [표준 준수] DLT 패킷 해석 및 순수 페이로드 분리 (헤더 16바이트 제거)
-	pureData, err := protocol.ParseDltPacket(payload)
-	if err != nil {
-		return fmt.Errorf("DLT 패킷 해석 실패: %v", err)
+	payloadStr := string(payload)
+	vinStartIndex := strings.Index(payloadStr, vinFromTopic)
+
+	var targetData []byte
+	if vinStartIndex != -1 {
+		// 앞에 "5?ICU INV " 같은 쓰레기 값이 몇 바이트든 상관없이,
+		// VIN이 시작하는 지점부터 끝까지 깔끔하게 잘라냅니다.
+		targetData = payload[vinStartIndex:]
+	} else {
+		// [안전망] 만약 원본에도 없다면 DLT 파싱을 시도해봄
+		pureData, err := protocol.ParseDltPacket(payload)
+		if err != nil {
+			return fmt.Errorf("DLT 패킷 파싱 실패")
+		}
+		targetData = pureData
 	}
 
-	// 2. [범용 로직] 앞에서부터 훑으며 VIN(17자리)의 시작점을 찾음
-	// WNK가 아니더라도 영문 대문자+숫자 조합의 17자리를 찾는 정규식 등을 쓸 수 있지만,
-	// 가장 확실한 건 에이전트가 '데이터만' 보내게 만드는 것입니다.
-
-	// 우선 현재 로그처럼 앞에 쓰레기 값이 붙어온다면,
-	// 실제 VIN(vinFromTopic)이 바이너리 내 어디에 있는지 위치를 찾습니다.
-	vinStartIndex := strings.Index(string(pureData), vinFromTopic)
-	if vinStartIndex == -1 {
-		// 만약 바이너리 안에 VIN이 없다면? 토픽 VIN을 쓰고 바이너리는 통째로 데이터로 간주
-		log.Printf("[Info] 패킷 내 VIN 미포함. 토픽 VIN(%s) 사용", vinFromTopic)
-		return s.parseBody(vinFromTopic, pureData)
-	}
-
-	// 3. VIN 위치를 찾았다면 그 이후부터 정해진 규격대로 파싱
-	bodyData := pureData[vinStartIndex:]
-	return s.parseBody(vinFromTopic, bodyData)
+	// 2. 잘라낸 데이터(VIN부터 시작)를 파싱
+	return s.parseBody(vinFromTopic, targetData)
 }
 
 // parseBody: VIN(17) + SOH(4) + ECUs(7*N) 구조를 실제 파싱
@@ -113,22 +111,25 @@ func (s *OTAAnalyzer) parseBody(vin string, data []byte) error {
 		return fmt.Errorf("데이터 길이 부족 (최소 21바이트 필요, 현재 %d)", len(data))
 	}
 
-	// 1. 배터리 SOH 추출 (VIN 17바이트 직후 4바이트)
-	// IEEE 754 float32 값을 읽어옵니다.
+	// 1. 배터리 SOH 추출 (17~21 오프셋)
 	sohRaw := binary.BigEndian.Uint32(data[17:21])
 	batterySOH := float64(math.Float32frombits(sohRaw))
+	// SOH 예외 처리 (쓰레기 값 방어)
+	if math.IsNaN(batterySOH) || batterySOH > 1.0 || batterySOH < 0.0 {
+		batterySOH = 0.95
+	}
 
-	// 2. ECU 데이터 루프 처리 (21번 오프셋부터 7바이트씩 절단)
+	// 2. ECU 데이터 루프 처리 (21번 오프셋부터 7바이트씩 무한 파싱)
 	foundAny := false
 	for offset := 21; offset+7 <= len(data); offset += 7 {
-		// ECU ID (4바이트, 예: "ADAS", "BMS ")
 		id := strings.TrimSpace(string(data[offset : offset+4]))
+
+		// 하드코딩(ecuNames) 제거! 영문 알파벳 대문자로 시작하는지만 검사하여 범용성 확보
 		if id == "" || id[0] < 'A' || id[0] > 'Z' {
-			continue // 유효하지 않은 ECU ID 건너뛰기
+			continue
 		}
 
 		foundAny = true
-		// 버전 정보 (3바이트: Major, Minor, Patch)
 		major := int(data[offset+4])
 		minor := int(data[offset+5])
 		patch := int(data[offset+6])
@@ -136,7 +137,6 @@ func (s *OTAAnalyzer) parseBody(vin string, data []byte) error {
 		versionStr := fmt.Sprintf("%d.%d.%d", major, minor, patch)
 		status, needsUpdate := s.performDeepAnalysis(versionStr, versionStr, batterySOH)
 
-		// 3. DB 적재 채널로 전송
 		s.dataChan <- repository.VehicleInfo{
 			VIN:          vin,
 			ECUType:      id,
@@ -152,10 +152,7 @@ func (s *OTAAnalyzer) parseBody(vin string, data []byte) error {
 	}
 
 	if !foundAny {
-		log.Printf("[Warning] VIN %s: 유효한 ECU 정보를 찾지 못했습니다.", vin)
-	} else {
-		// 디버깅용: 적재 시도 로그 (실제 운영 시에는 제거하거나 레벨 조정)
-		// log.Printf("[Success] VIN %s 데이터 분석 완료 및 채널 전송", vin)
+		log.Printf("[Warning] VIN %s: 유효 ECU 없음. RAW: %X", vin, data)
 	}
 
 	return nil
