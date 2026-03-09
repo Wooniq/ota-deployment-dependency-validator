@@ -58,7 +58,7 @@ func main() {
 	log.Println("[Step 3] OTA 분석 엔진 준비 완료")
 
 	// 5. [Transport] Kafka Consumer 기동(분석용)
-	kafkaConsumer := transport.NewKafkaConsumer(brokers, "ota-inventory", "analyzer-group-v2")
+	kafkaConsumer := transport.NewKafkaConsumer(brokers, "ota-inventory", "analyzer-group-v1")
 	go kafkaConsumer.StartConsuming(context.Background(), analyzer)
 	log.Println("[Step 4] Kafka Consumer (분석 계층) 가동 중")
 

@@ -20,9 +20,12 @@ func NewKafkaConsumer(brokers []string, topic, groupID string) *KafkaConsumer {
 			Brokers:        brokers,
 			GroupID:        groupID, // 동일 그룹 내 컨슈머끼리 메시지 분배
 			Topic:          topic,
-			MinBytes:       10e3, // 10KB
+			MinBytes:       1,
 			MaxBytes:       10e6, // 10MB
+			StartOffset:    kafka.FirstOffset,
 			CommitInterval: time.Second,
+			// 연결 문제 발생 시 더 빨리 알 수 있도록 재시도 간격 조정
+          		MaxWait:        500 * time.Millisecond,
 		}),
 	}
 }
