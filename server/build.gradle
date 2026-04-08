@@ -1,0 +1,56 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.ota'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // ── Core ──
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // ── SAP HANA DB ──
+    implementation 'com.sap.cloud.db.jdbc:ngdbc:2.21.11'
+
+    // ── Kafka ──
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // ── MQTT (Eclipse Paho) ──
+    implementation 'org.springframework.integration:spring-integration-mqtt'
+    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
+
+    // ── Redis (추후 활성화) ──
+    // implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // ── AWS S3 ──
+    implementation 'software.amazon.awssdk:s3:2.25.60'
+
+    // ── Util ──
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // ── Test ──
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+
+    // ── Dev ──
+    runtimeOnly 'com.h2database:h2' // 로컬 개발용 (HANA 없을 때)
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

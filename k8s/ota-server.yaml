@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ota-control-server
+  labels:
+    app: ota-control-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ota-control-server
+  template:
+    metadata:
+      labels:
+        app: ota-control-server
+    spec:
+      containers:
+        - name: ota-server
+          image: ota-control-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "prod"
+            - name: HANA_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: ota-db-secret
+                  key: address
+            - name: HANA_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ota-db-secret
+                  key: port
+            - name: HANA_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ota-db-secret
+                  key: username
+            - name: HANA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ota-db-secret
+                  key: password
+            - name: KAFKA_BROKERS
+              value: "kafka-1:9092,kafka-2:9092,kafka-3:9092"
+            - name: MQTT_BROKER
+              value: "tcp://mqtt-broker:1883"
+          readinessProbe:
+            httpGet:
+              path: /api/ota
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/ota
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ota-control-server
+spec:
+  selector:
+    app: ota-control-server
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
