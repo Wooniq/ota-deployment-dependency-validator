@@ -1,0 +1,89 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ota-control-server
+
+  profiles:
+    active: local
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: analyzer-group-v1
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+mqtt:
+  broker-url: ${MQTT_BROKER:tcp://localhost:1883}
+  client-id: OTA-Server-Commander
+  topics:
+    inventory: ota/inventory
+    command: ota/command
+
+aws:
+  s3:
+    bucket-firmware: ${S3_BUCKET_FIRMWARE:ota-firmware-bucket}
+    bucket-frontend: ${S3_BUCKET_FRONTEND:ota-backoffice-bucket}
+    region: ${AWS_REGION:ap-northeast-2}
+
+ota:
+  baseline:
+    adas-version: v2.2.2
+    bms-version: v1.3.9
+
+---
+# ── Local 프로필: H2 사용 ──
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:mem:otadb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  kafka:
+    listener:
+      auto-startup: false
+  h2:
+    console:
+      enabled: true
+
+---
+# ── Production 프로필: HANA DB ──
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: jdbc:sap://${HANA_ADDRESS}:${HANA_PORT}
+    driver-class-name: com.sap.db.jdbc.Driver
+    username: ${HANA_USER}
+    password: ${HANA_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.HANAColumnStoreDialect
+        default_schema: ota_tables
