@@ -82,3 +82,5 @@ infra/zookeeper/data/
 # Go binary & dependencies
 cmd/agent/agent.exe
 vendor/
+
+k8s/secret.yaml
