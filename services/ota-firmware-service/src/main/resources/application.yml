@@ -1,0 +1,12 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: ota-firmware-service
+
+aws:
+  s3:
+    bucket-firmware: ${S3_BUCKET_FIRMWARE:ota-firmware-bucket}
+    bucket-frontend: ${S3_BUCKET_FRONTEND:ota-backoffice-bucket}
+    region: ${AWS_REGION:ap-northeast-2}
