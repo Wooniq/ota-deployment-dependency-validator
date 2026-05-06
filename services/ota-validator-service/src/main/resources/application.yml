@@ -1,0 +1,65 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: ota-validator-service
+
+  profiles:
+    active: local
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+service:
+  inventory:
+    url: ${INVENTORY_SERVICE_URL:http://localhost:8081}
+  campaign:
+    url: ${CAMPAIGN_SERVICE_URL:http://localhost:8083}
+
+ota:
+  inventory:
+    max-age-minutes: ${OTA_INVENTORY_MAX_AGE_MINUTES:10}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:mem:ota_validator_db
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  h2:
+    console:
+      enabled: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: jdbc:sap://${HANA_ADDRESS}:${HANA_PORT}
+    driver-class-name: com.sap.db.jdbc.Driver
+    username: ${HANA_USER}
+    password: ${HANA_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.HANAColumnStoreDialect
+        default_schema: ota_validator
