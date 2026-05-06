@@ -8,6 +8,7 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -41,11 +42,12 @@ public class DataInitializer implements CommandLineRunner {
                 .vehicleId("V002").modelName("GV80").status(Vehicle.VehicleStatus.READY).build());
 
         // 2. ECU 현황 (V002는 BCM 버전이 낮음 → 검증 실패 유도용)
+        Instant now = Instant.now();
         ecuRepo.saveAll(List.of(
-                Ecu.builder().vehicleId("V001").ecuType("BMS").major(2).minor(0).patch(0).build(),
-                Ecu.builder().vehicleId("V001").ecuType("BCM").major(1).minor(5).patch(0).build(),
-                Ecu.builder().vehicleId("V002").ecuType("BMS").major(2).minor(0).patch(0).build(),
-                Ecu.builder().vehicleId("V002").ecuType("BCM").major(1).minor(0).patch(0).build()
+                Ecu.builder().vehicleId("V001").ecuType("BMS").major(2).minor(0).patch(0).lastReportedAt(now).build(),
+                Ecu.builder().vehicleId("V001").ecuType("BCM").major(1).minor(5).patch(0).lastReportedAt(now).build(),
+                Ecu.builder().vehicleId("V002").ecuType("BMS").major(2).minor(0).patch(0).lastReportedAt(now).build(),
+                Ecu.builder().vehicleId("V002").ecuType("BCM").major(1).minor(0).patch(0).lastReportedAt(now).build()
         ));
 
         // 3. 업데이트 패키지

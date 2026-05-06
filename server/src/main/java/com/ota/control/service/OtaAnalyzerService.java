@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.Instant;
 
 /**
  * OTA 분석 엔진
@@ -63,6 +64,7 @@ public class OtaAnalyzerService {
             ecu.setMajor(major);
             ecu.setMinor(minor);
             ecu.setPatch(patch);
+            ecu.setLastReportedAt(Instant.now());
             ecuRepository.save(ecu);
 
             // 기준 버전 미달 시 롤백 커맨드 발송

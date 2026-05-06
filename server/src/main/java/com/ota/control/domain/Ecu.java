@@ -2,9 +2,16 @@ package com.ota.control.domain;
 
 import jakarta.persistence.*;
 import lombok.*;
+import java.time.Instant;
 
 @Entity
-@Table(name = "ecus")
+@Table(
+        name = "ecus",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_ecu_vehicle_type",
+                columnNames = {"vehicle_id", "ecu_type"}
+        )
+)
 @Getter @Setter
 @NoArgsConstructor
 @AllArgsConstructor
@@ -29,6 +36,9 @@ public class Ecu {
 
     @Column(nullable = false)
     private Integer patch;
+
+    @Column(name = "last_reported_at", nullable = false)
+    private Instant lastReportedAt;
 
     /**
      * Semantic Version 문자열 반환 (예: "2.1.0")
