@@ -3,19 +3,25 @@ package com.ota.control.service;
 import com.ota.control.domain.DependencyRule;
 import com.ota.control.domain.Ecu;
 import com.ota.control.domain.UpdatePackage;
+import com.ota.control.domain.ValidationHistory;
 import com.ota.control.dto.OtaCheckDto.CheckResponse;
 import com.ota.control.repository.DependencyRuleRepository;
 import com.ota.control.repository.EcuRepository;
+import com.ota.control.repository.ValidationHistoryRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -32,6 +38,9 @@ class OtaValidatorServiceTest {
     @Mock
     private DependencyRuleRepository ruleRepository;
 
+    @Mock
+    private ValidationHistoryRepository validationHistoryRepository;
+
     @InjectMocks
     private OtaValidatorService validatorService;
 
@@ -39,9 +48,10 @@ class OtaValidatorServiceTest {
     @DisplayName("V001 (BCM 1.5.0) - 의존성 충족 → 업데이트 가능")
     void shouldPassWhenVersionMeetsRequirement() {
         // given: V001의 ECU 현황 (test_connection.py 데이터)
+        Instant now = Instant.now();
         List<Ecu> ecus = List.of(
-                Ecu.builder().vehicleId("V001").ecuType("BMS").major(2).minor(0).patch(0).build(),
-                Ecu.builder().vehicleId("V001").ecuType("BCM").major(1).minor(5).patch(0).build()
+                Ecu.builder().vehicleId("V001").ecuType("BMS").major(2).minor(0).patch(0).lastReportedAt(now).build(),
+                Ecu.builder().vehicleId("V001").ecuType("BCM").major(1).minor(5).patch(0).lastReportedAt(now).build()
         );
 
         UpdatePackage pkg = UpdatePackage.builder().packageId("PKG_BMS_30").build();
@@ -64,15 +74,20 @@ class OtaValidatorServiceTest {
         assertThat(result.getDetails()).hasSize(1);
         assertThat(result.getDetails().get(0).getStatus()).isEqualTo("PASS");
         assertThat(result.getDetails().get(0).getCurrentVersion()).isEqualTo("1.5.0");
+
+        ArgumentCaptor<ValidationHistory> captor = ArgumentCaptor.forClass(ValidationHistory.class);
+        verify(validationHistoryRepository).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(ValidationHistory.ValidationStatus.PASS);
     }
 
     @Test
     @DisplayName("V002 (BCM 1.0.0) - 의존성 미달 → 업데이트 불가")
     void shouldFailWhenVersionBelowRequirement() {
         // given: V002의 ECU 현황 (BCM 1.0.0 < 요구 1.2.0)
+        Instant now = Instant.now();
         List<Ecu> ecus = List.of(
-                Ecu.builder().vehicleId("V002").ecuType("BMS").major(2).minor(0).patch(0).build(),
-                Ecu.builder().vehicleId("V002").ecuType("BCM").major(1).minor(0).patch(0).build()
+                Ecu.builder().vehicleId("V002").ecuType("BMS").major(2).minor(0).patch(0).lastReportedAt(now).build(),
+                Ecu.builder().vehicleId("V002").ecuType("BCM").major(1).minor(0).patch(0).lastReportedAt(now).build()
         );
 
         UpdatePackage pkg = UpdatePackage.builder().packageId("PKG_BMS_30").build();
@@ -94,7 +109,12 @@ class OtaValidatorServiceTest {
         assertThat(result.isAvailable()).isFalse();
         assertThat(result.getDetails()).hasSize(1);
         assertThat(result.getDetails().get(0).getStatus()).isEqualTo("FAIL");
+        assertThat(result.getDetails().get(0).getReasonCode()).isEqualTo("VERSION_BELOW_REQUIRED");
         assertThat(result.getDetails().get(0).getReason()).contains("버전 미달");
+
+        ArgumentCaptor<ValidationHistory> captor = ArgumentCaptor.forClass(ValidationHistory.class);
+        verify(validationHistoryRepository).save(captor.capture());
+        assertThat(captor.getValue().getReasonCode()).isEqualTo(ValidationHistory.FailureReason.VERSION_BELOW_REQUIRED);
     }
 
     @Test
@@ -122,6 +142,44 @@ class OtaValidatorServiceTest {
 
         // then
         assertThat(result.isAvailable()).isFalse();
+        assertThat(result.getDetails().get(0).getReasonCode()).isEqualTo("MISSING_REQUIRED_ECU");
         assertThat(result.getDetails().get(0).getReason()).contains("찾을 수 없습니다");
+    }
+
+    @Test
+    @DisplayName("인벤토리가 오래된 경우 → stale 실패로 이력화")
+    void shouldFailWhenInventoryIsStale() {
+        // given
+        List<Ecu> ecus = List.of(
+                Ecu.builder()
+                        .vehicleId("V004")
+                        .ecuType("BCM")
+                        .major(1).minor(5).patch(0)
+                        .lastReportedAt(Instant.now().minus(30, ChronoUnit.MINUTES))
+                        .build()
+        );
+
+        UpdatePackage pkg = UpdatePackage.builder().packageId("PKG_BMS_30").build();
+        List<DependencyRule> rules = List.of(
+                DependencyRule.builder()
+                        .updatePackage(pkg)
+                        .requiredType("BCM")
+                        .minMajor(1).minMinor(2).minPatch(0)
+                        .build()
+        );
+
+        when(ecuRepository.findByVehicleId("V004")).thenReturn(ecus);
+        when(ruleRepository.findByUpdatePackagePackageId("PKG_BMS_30")).thenReturn(rules);
+
+        // when
+        CheckResponse result = validatorService.validateUpdate("V004", "PKG_BMS_30");
+
+        // then
+        assertThat(result.isAvailable()).isFalse();
+        assertThat(result.getDetails().get(0).getReasonCode()).isEqualTo("STALE_INVENTORY");
+
+        ArgumentCaptor<ValidationHistory> captor = ArgumentCaptor.forClass(ValidationHistory.class);
+        verify(validationHistoryRepository).save(captor.capture());
+        assertThat(captor.getValue().getReasonCode()).isEqualTo(ValidationHistory.FailureReason.STALE_INVENTORY);
     }
 }

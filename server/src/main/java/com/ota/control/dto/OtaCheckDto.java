@@ -41,6 +41,7 @@ public class OtaCheckDto {
         private String status;          // PASS / FAIL
         private String currentVersion;
         private String requiredVersion;
+        private String reasonCode;      // 실패 사유 코드 (nullable)
         private String reason;          // 실패 사유 (nullable)
     }
 }
