@@ -18,11 +18,15 @@ jobs:
         with:
           go-version: '1.25.x'
 
+      # go.work의 use 디렉터리(cmd/agent, cmd/dashboard, cmd/server, pkg)만 워크스페이스
+      # 모듈로 인식되고 리포 루트(.)는 모듈이 아니므로, 루트에서 "./..."를 그대로 쓰면
+      # "directory prefix . does not contain modules listed in go.work" 로 실패한다.
+      # 각 모듈 디렉터리를 패턴에 직접 명시해 우회한다.
       - name: Go Build (workspace)
-        run: go build ./...
+        run: go build ./cmd/agent/... ./cmd/dashboard/... ./cmd/server/... ./pkg/...
 
       - name: Go Test (workspace)
-        run: go test ./...
+        run: go test ./cmd/agent/... ./cmd/dashboard/... ./cmd/server/... ./pkg/...
 
   java-test-server:
     runs-on: ubuntu-latest
