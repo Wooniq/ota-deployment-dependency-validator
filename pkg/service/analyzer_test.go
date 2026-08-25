@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Wooniq/ota-agent/internal/repository"
+	"github.com/Wooniq/ota-agent/pkg/repository"
 )
 
 func TestAnalyzeAndSaveBinary_SOH(t *testing.T) {

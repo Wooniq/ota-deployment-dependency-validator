@@ -8,33 +8,90 @@ on:
     types: [labeled, opened, synchronize, reopened] # PR 관련 이벤트 구체화
 
 jobs:
-  test-and-build:
+  go-build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+      - uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25.x'
 
-      - name: Go Build Check (Agent)
-        run: |
-          cd cmd/agent
-          go build -v -o /dev/null ./main.go
+      - name: Go Build (workspace)
+        run: go build ./...
 
-      - name: Go Build Check (Server)
+      - name: Go Test (workspace)
+        run: go test ./...
+
+  java-test-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Test (server)
+        working-directory: server
         run: |
-          cd cmd/server
-          go build -v -o /dev/null ./main.go
+          chmod +x ./gradlew
+          ./gradlew test --no-daemon
+
+  java-test-services:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ota-inventory-service
+          - ota-validator-service
+          - ota-campaign-service
+          - ota-firmware-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Test (${{ matrix.service }})
+        working-directory: services/${{ matrix.service }}
+        run: gradle test --no-daemon
+
+  docker-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ota-inventory-service
+          - ota-validator-service
+          - ota-campaign-service
+          - ota-firmware-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: false
+          tags: ota/${{ matrix.service }}:ci
 
   automerge:
-    needs: test-and-build
+    needs: [go-build-test, java-test-server, java-test-services, docker-build]
     runs-on: ubuntu-latest
     # PR 이벤트이거나, 특정 라벨이 붙었을 때 실행되도록 설정 가능
     if: github.event_name == 'pull_request'
