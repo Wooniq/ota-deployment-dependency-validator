@@ -8,33 +8,94 @@ on:
     types: [labeled, opened, synchronize, reopened] # PR 관련 이벤트 구체화
 
 jobs:
-  test-and-build:
+  go-build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+      - uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25.x'
 
-      - name: Go Build Check (Agent)
-        run: |
-          cd cmd/agent
-          go build -v -o /dev/null ./main.go
+      # go.work의 use 디렉터리(cmd/agent, cmd/dashboard, cmd/server, pkg)만 워크스페이스
+      # 모듈로 인식되고 리포 루트(.)는 모듈이 아니므로, 루트에서 "./..."를 그대로 쓰면
+      # "directory prefix . does not contain modules listed in go.work" 로 실패한다.
+      # 각 모듈 디렉터리를 패턴에 직접 명시해 우회한다.
+      - name: Go Build (workspace)
+        run: go build ./cmd/agent/... ./cmd/dashboard/... ./cmd/server/... ./pkg/...
 
-      - name: Go Build Check (Server)
+      - name: Go Test (workspace)
+        run: go test ./cmd/agent/... ./cmd/dashboard/... ./cmd/server/... ./pkg/...
+
+  java-test-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Test (server)
+        working-directory: server
         run: |
-          cd cmd/server
-          go build -v -o /dev/null ./main.go
+          chmod +x ./gradlew
+          ./gradlew test --no-daemon
+
+  java-test-services:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ota-inventory-service
+          - ota-validator-service
+          - ota-campaign-service
+          - ota-firmware-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Test (${{ matrix.service }})
+        working-directory: services/${{ matrix.service }}
+        run: gradle test --no-daemon
+
+  docker-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ota-inventory-service
+          - ota-validator-service
+          - ota-campaign-service
+          - ota-firmware-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: false
+          tags: ota/${{ matrix.service }}:ci
 
   automerge:
-    needs: test-and-build
+    needs: [go-build-test, java-test-server, java-test-services, docker-build]
     runs-on: ubuntu-latest
     # PR 이벤트이거나, 특정 라벨이 붙었을 때 실행되도록 설정 가능
     if: github.event_name == 'pull_request'

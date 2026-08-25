@@ -39,8 +39,8 @@
 │ • DLT Parser │    │                     │ └─────────────────────┘
 │ • VIN Valid. │    │ • Validator Service  │
 │ • MQTT Pub   │    │ • Analyzer Service  │
-│ • gRPC Client│    │ • Campaign Service  │
-└──────┬───────┘    │ • Firmware Service  │
+└──────┬───────┘    │ • Campaign Service  │
+                    │ • Firmware Service  │
        │            └──────────┬──────────┘
        │ MQTT                  │ JDBC
        ▼                       ▼
@@ -196,7 +196,7 @@ Vehicle Agent ──MQTT──▶ Collector ──Kafka──▶ Analyzer ──
 
 ### 3. 캠페인 기반 배포 관리
 
-수백만 대 차량을 효율적으로 관리하기 위해 캠페인 단위의 배치 배포 구조를 채택했습니다.
+(설계 목표) 수백만 대 규모의 차량군까지 확장 가능하도록, 캠페인 단위의 배치 배포 구조를 채택했습니다. 현재는 1,000대 시뮬레이션 기준으로 검증되었습니다.
 
 ```
 CREATED → VALIDATING → IN_PROGRESS → COMPLETED
@@ -311,7 +311,7 @@ curl http://<EC2_PUBLIC_IP>:30080/api/ota
 | 차량 에이전트 언어 | Go | 경량 바이너리, 낮은 리소스 사용, 임베디드 환경 적합 |
 | 에이전트 ↔ 서버 통신 | MQTT + Kafka | MQTT: 경량 텔레메트리, Kafka: 안정적 이벤트 파이프라인 |
 | DB 검증 전략 | DB-Level Validation | CDS View에서 의존성 체크 → 데이터 정합성 + 고속 조인 |
-| 배포 단위 | 캠페인 기반 | 수백만 대 차량 배치 관리에 적합한 구조 |
+| 배포 단위 | 캠페인 기반 | (설계 목표) 수백만 대 규모까지 확장 가능한 배치 관리 구조. 현재 검증 규모는 1,000대 |
 | HW 호환성 | `target_hw_version` 필드 | 동일 ECU라도 생산 시점별 HW 차이 → Brick 원천 차단 |
 
 ---

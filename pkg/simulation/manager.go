@@ -9,6 +9,7 @@ package simulation
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -36,7 +37,7 @@ func RunSimulation(ctx context.Context, total int, client mqtt.Client) {
 
 			// [관심사 분리] 개별 차량 객체에 의존성(MQTT Client) 주입
 			v := engine.Vehicle{
-				ID:     id,
+				VIN:    fmt.Sprintf("SIM-VEHICLE-%06d", id),
 				Client: client,
 			}
 

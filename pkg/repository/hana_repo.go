@@ -83,6 +83,60 @@ func (r *HANARepository) BulkUpsertVehicles(batch []VehicleInfo) error {
 	return tx.Commit()
 }
 
+// GetAllVehicles: Vehicle_ECU_Inventory 테이블의 전체 차량/ECU 목록 조회
+func (r *HANARepository) GetAllVehicles() ([]VehicleInfo, error) {
+	query := `SELECT
+		"VIN", "ECUType", "HWVersion", "SWMajor", "SWMinor", "SWPatch",
+		"BatterySOH", "LastReported", "UPDATE_STATUS", "REGION_CODE", "NEEDS_UPDATE"
+	FROM "Vehicle_ECU_Inventory"`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("전체 차량 조회 실패: %w", err)
+	}
+	defer rows.Close()
+
+	return scanVehicleRows(rows)
+}
+
+// GetVehiclesByUpdateStatus: NEEDS_UPDATE 값으로 필터링된 차량/ECU 목록 조회
+func (r *HANARepository) GetVehiclesByUpdateStatus(needsUpdate bool) ([]VehicleInfo, error) {
+	query := `SELECT
+		"VIN", "ECUType", "HWVersion", "SWMajor", "SWMinor", "SWPatch",
+		"BatterySOH", "LastReported", "UPDATE_STATUS", "REGION_CODE", "NEEDS_UPDATE"
+	FROM "Vehicle_ECU_Inventory"
+	WHERE "NEEDS_UPDATE" = ?`
+
+	rows, err := r.db.Query(query, needsUpdate)
+	if err != nil {
+		return nil, fmt.Errorf("업데이트 대상 차량 조회 실패: %w", err)
+	}
+	defer rows.Close()
+
+	return scanVehicleRows(rows)
+}
+
+// scanVehicleRows: Vehicle_ECU_Inventory 쿼리 결과를 VehicleInfo 슬라이스로 스캔
+func scanVehicleRows(rows *sql.Rows) ([]VehicleInfo, error) {
+	vehicles := make([]VehicleInfo, 0)
+	for rows.Next() {
+		var v VehicleInfo
+		var status string
+		if err := rows.Scan(
+			&v.VIN, &v.ECUType, &v.HWVersion, &v.SWMajor, &v.SWMinor, &v.SWPatch,
+			&v.BatterySOH, &v.LastReported, &status, &v.RegionCode, &v.NeedsUpdate,
+		); err != nil {
+			return nil, fmt.Errorf("차량 정보 스캔 실패: %w", err)
+		}
+		v.UpdateStatus = StatusCode(status)
+		vehicles = append(vehicles, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("차량 조회 결과 순회 실패: %w", err)
+	}
+	return vehicles, nil
+}
+
 // extractIDFromVIN: VIN 내 숫자 패턴을 BIGINT로 변환하여 PK 정합성 확보
 func extractIDFromVIN(vin string) int64 {
 	re := regexp.MustCompile(`[0-9]+`)
